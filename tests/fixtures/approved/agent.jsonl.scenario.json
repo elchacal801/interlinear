@@ -1,6 +1,6 @@
 {
   "title": "agent.jsonl",
-  "description": "Exported by Interlinear 0.1.0 from agent.jsonl. The steps follow the transcript's line order; each cites its transcript lines and gloss sources.",
+  "description": "Exported by Interlinear 0.1.0 from agent.jsonl. Steps are chained only within each source file, in its line order; the files are parallel lanes, since nothing in them orders one against another. Each step cites its transcript lines and gloss sources.",
   "authors": [],
   "steps": [
     {

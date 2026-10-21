@@ -8,7 +8,8 @@ from interlinear_cti.export import export_scenario
 from interlinear_cti.model import Gloss, Line, Source, Technique, Transcript, save
 from interlinear_cti.normalize import defang
 
-ORDER_NOTE = "The steps follow the transcript's line order; each cites its transcript lines and gloss sources."
+ORDER_NOTE = ("Steps are chained only within each source file, in its line order; the files are parallel lanes, since "
+              "nothing in them orders one against another. Each step cites its transcript lines and gloss sources.")
 
 
 def g(source, *ids, meaning="Does something.", revoked_to=None):
@@ -218,10 +219,11 @@ def test_steps_never_merge_lines_from_two_sources():
                             parsed_at="2026-10-15T00:00:00Z"))
     t.lines[1].source = 1  # line 2: the same technique and actor as line 1, from another file
     spec, _ = export_scenario(t)
+    # Each file is a lane of its own: no step of one file comes after a step of another.
     assert [(step["id"], step["technique"], step.get("after")) for step in spec["steps"]] == [
-        ("s1", "T1105", None), ("s2", "T1105", ["s1"]), ("s3", "T1690", ["s2"]), ("s4", "T1053.003", ["s3"])]
-    assert spec["steps"][0]["description"] == "Line 1 (rule; operator): Downloads a script and runs it."
-    assert spec["steps"][1]["description"] == "Line 2 (rule; operator): Downloads a file."
+        ("s1", "T1105", None), ("s2", "T1690", ["s1"]), ("s3", "T1053.003", ["s2"]), ("s4", "T1105", None)]
+    assert spec["steps"][0]["description"] == ".bash_history: Line 1 (rule; operator): Downloads a script and runs it."
+    assert spec["steps"][3]["description"] == "b.sh: Line 2 (rule; operator): Downloads a file."
     assert spec["description"].endswith(ORDER_NOTE)
 
 

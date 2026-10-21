@@ -293,11 +293,13 @@ def cmd_render(args: argparse.Namespace) -> int:
 
 
 def cmd_export(args: argparse.Namespace) -> int:
-    from .export import NO_STEPS, export_scenario
+    from .export import NO_STEPS, export_scenario, find_source
     from .model import load
 
     _refuse_transcript(args.transcript, args.output)
-    spec, warnings = export_scenario(load(args.transcript), title=args.title)
+    transcript = load(args.transcript)
+    source = None if args.source is None else find_source(transcript, args.source)
+    spec, warnings = export_scenario(transcript, title=args.title, source=source)
     if not spec["steps"]:  # Countermap rejects a scenario with no steps, so none is written
         for warning in warnings:
             if warning != NO_STEPS:
@@ -375,6 +377,8 @@ def build_parser() -> argparse.ArgumentParser:
     ex.add_argument("transcript")
     ex.add_argument("-o", "--output", required=True)
     ex.add_argument("--title")
+    ex.add_argument("--source", metavar="NAME_OR_ID",
+                    help="export only this source file, named as in the transcript or by its id")
     ex.set_defaults(func=cmd_export)
     return parser
 

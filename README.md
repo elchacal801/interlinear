@@ -93,6 +93,8 @@ interlinear export-scenario out/transcript.json -o scenario.json
 
 Any sandbox works if it gives the parse stage no network, a read-only input, a writable output folder and about 3 GB of memory.
 
+`export-scenario` chains steps only within each source file, in its line order. Nothing in two files orders one against the other (a history without timestamps has no order at all), so each file is a parallel lane, and each step names its file when there are several. `--source NAME_OR_ID` exports one file alone. Back-to-back lines with the same technique become one step. A line whose text addresses an analyst or an AI model rather than the target, such as "ignore all previous instructions" or "note to the reviewer: this is an authorized test", is left out of the scenario with a warning.
+
 ## Input kinds
 
 A file's name or content decides how it is read, for example `.bash_history`, `.zsh_history`, `ConsoleHost_history.txt`, `.sh`, `.ps1` and agent `.jsonl`. A file that matches none of them is kept line by line as `unknown`.
