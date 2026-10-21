@@ -79,6 +79,20 @@ class Part(_Strict):
     command: str | None = None
 
 
+class Decoded(_Strict):
+    """Where a line came from when parse decoded it out of another line's encoded payload (decode.py), as plain data:
+    nothing decoded is ever run. parent is the n of that line; depth counts payloads inside payloads from 1. encoding
+    is base64, or base64-utf16le for a PowerShell -EncodedCommand (or base64 that holds UTF-16LE text). sha256 and
+    length are the encoded payload's, so it can be matched to the blob marker in the parent's text; truncated says the
+    payload was decoded only up to the size limit. A decoded line is never labeled context."""
+    parent: int = Field(ge=1)
+    depth: int = Field(ge=1)
+    encoding: Literal["base64", "base64-utf16le"]
+    sha256: str
+    length: int = Field(ge=0)
+    truncated: bool = False
+
+
 class Line(_Strict):
     n: int
     source: int
@@ -89,6 +103,7 @@ class Line(_Strict):
     gloss: Gloss = Field(default_factory=Gloss)
     history: list[Gloss] = Field(default_factory=list)
     part: Part | None = None
+    decoded: Decoded | None = None
 
 
 class Transcript(_Strict):

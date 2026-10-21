@@ -30,6 +30,7 @@ The rule library labels a line as context (`none`) only when the line is plainly
 
 - Only `interlinear parse` reads raw attacker files.
   - It is standard-library Python that never executes its input, opens no network connections, defangs URLs, IPs and domains, and replaces encoded blobs with their SHA-256.
+  - It also decodes encoded payloads as plain data, never running them: base64 on a line that also decodes base64 (`base64 -d`, `FromBase64String`, `b64decode` and the like), and a PowerShell `-EncodedCommand` blob (UTF-16LE). What a payload holds becomes child lines after its line, marked `decoded` with the parent line's number, the encoding and the payload's SHA-256, and goes through the rules, IOC extraction and the model like any line, but is never labeled context. A payload decodes to at most 64 KiB, and payloads inside payloads to three levels.
   - Run it inside a sandbox: `interlinear build-parse-pyz` packages it as a single file for that.
 - Every later stage reads only the resulting `transcript.json`.
 - Transcript text can contain instructions aimed at AI analysts. The gloss skill treats it as data and never acts on it.

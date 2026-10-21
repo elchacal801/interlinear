@@ -11,7 +11,8 @@ from pathlib import Path
 from .fileio import OutputError, atomic_write
 
 PACKAGE = Path(__file__).resolve().parent
-PARSE_FILES = ("__init__.py", "fileio.py", "parse.py", "parse_main.py", "normalize.py", "textshow.py", "tlds.py")
+PARSE_FILES = ("__init__.py", "decode.py", "fileio.py", "parse.py", "parse_main.py", "normalize.py", "textshow.py",
+               "tlds.py")
 
 
 def build(output: str | Path) -> Path:

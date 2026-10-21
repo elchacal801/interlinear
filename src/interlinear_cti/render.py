@@ -133,6 +133,8 @@ def _block(line: Line, agent: bool) -> list[str]:
         if line.part.command is not None:
             block.append(INDENT + f"[agent tool call, record line {line.line}, {line.part.of} commands]")
             block += [INDENT + CALL_MARK + text for text in line.part.command.split("\n")]
+    if line.decoded is not None:
+        prefix += f"[decoded from line {line.decoded.parent}] "
     block += [f"{line.n:>4}  {prefix}{first}", *(INDENT + r for r in rest)]
     g = line.gloss
     techniques = SEPARATOR.join(_technique_label(t) for t in g.techniques)

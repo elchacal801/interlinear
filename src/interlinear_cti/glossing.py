@@ -103,7 +103,8 @@ def apply_rules(transcript: Transcript, library: Library, at: str) -> dict[str, 
         if line.gloss.source != "pending" or not _rules_apply(line.actor, kinds.get(line.source)):
             continue
         first, _, n = limits.get(line.source, (line.line + 1, "", line.n + 1))
-        context = line.source not in denied and line.line < first and line.n < n
+        # A line decoded from a payload is never context: it was hidden on purpose.
+        context = line.source not in denied and line.line < first and line.n < n and line.decoded is None
         # A record that spans lines goes to the model unless a rule reads it whole (Library.match_record).
         rule = library.match_record(line.text, context=context, zsh=kinds.get(line.source) == "zsh_history")
         if rule is None:
@@ -130,6 +131,8 @@ def is_open(gloss: Gloss) -> bool:
 
 def _pending_row(line) -> dict:
     row = {"n": line.n, "actor": line.actor, "text": line.text}
+    if line.decoded is not None:
+        row["decoded_from"] = line.decoded.parent
     if line.gloss.source == "rule":  # partial: what the rule found, and what it left
         row["rule"] = {"id": line.gloss.rule_id, "techniques": [t.id for t in line.gloss.techniques],
                        "partial": line.gloss.partial}
@@ -285,6 +288,8 @@ def apply_glosses(transcript: Transcript, entries: list, *, source: str, by: str
             problem = "no such line"
         elif line.actor == "tool_output":
             problem = "tool output is not glossed"
+        elif entry.context and line.decoded is not None:
+            problem = "a line decoded from an encoded payload is never context"
         elif source == "model" and not is_open(line.gloss):
             problem = f"already glossed ({line.gloss.source}); model glosses only fill pending lines"
         elif entry.context and entry.techniques:

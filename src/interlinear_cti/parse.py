@@ -22,7 +22,7 @@ import sys
 import unicodedata
 from pathlib import Path
 
-from . import __version__
+from . import __version__, decode
 from .fileio import atomic_write
 from .normalize import defang, has_unusual_characters, normalize_text, split_command_spans
 from .readers import RawCommand, split_lines
@@ -40,6 +40,8 @@ MAX_LINES = 500_000  # transcript lines per run; the rest of the run is recorded
 MAX_RETAINED_BYTES = 256 * 1024 * 1024  # the run's line text, by sys.getsizeof; the rest is recorded by hash only
 MAX_FILES = 100_000  # files recorded per run; any more are only counted
 MAX_READER_WARNINGS = 100  # a file's reader warnings kept; the rest are counted in one warning
+MAX_DECODED_LINES = 64  # child lines decoded from one command's payloads, at every depth together
+_PARENT = "_parent"  # a decoded line's parent line, held until the run's lines are numbered
 MAX_WARNINGS = 10_000  # a run's warnings kept; the rest are counted in one final warning
 # Folders deeper than this are not walked. os.walk recurses on Python 3.10 and 3.11 and raises RecursionError near
 # 1,000 levels; this leaves room below that for the caller's stack, and makes every supported Python walk the same.
@@ -306,11 +308,60 @@ def iter_lines(commands: list[RawCommand], sid: int, powershell: bool = False, p
                 if k == 0:
                     out["part"]["command"] = normalize_text(text)
             yield out
+            if cmd.actor in SPLIT_ACTORS:
+                yield from _decoded_lines(part, out, powershell, depth=1, budget=[MAX_DECODED_LINES])
+
+
+def _decoded_lines(text: str, parent: dict, powershell: bool, depth: int, budget: list[int]):
+    """The child lines of the payloads that one command's text holds (decode.payloads), decoded as plain data and
+    never run: at most decode.MAX_PAYLOADS payloads per command, decode.MAX_DEPTH levels of payloads inside payloads,
+    and budget[0] lines for the whole top-level command. Each child keeps its parent's source, line, timestamp and
+    actor, and its decoded entry names its encoding, depth, and the payload's SHA-256 and length; the parent's n is
+    set once the run's lines are numbered (_link_decoded). Its text is shown, split and normalized as a line's is."""
+    decoded = 0
+    for token, encoding in decode.payloads(text):
+        if decoded >= decode.MAX_PAYLOADS or budget[0] <= 0:
+            return
+        found = decode.decode_payload(token, encoding)
+        if found is None:
+            continue
+        decoded += 1
+        plain, encoding, truncated = found
+        shown = show_controls(plain)
+        in_powershell = powershell or encoding == decode.UTF16
+        parts = split_powershell_statements(shown) if in_powershell else [p for _, p in split_command_spans(shown)]
+        digest = hashlib.sha256(token.encode("ascii")).hexdigest()
+        for piece in parts:
+            if not piece.strip(" \t\n"):
+                continue
+            if budget[0] <= 0:
+                return
+            budget[0] -= 1
+            child = {"n": 0, "source": parent["source"], "line": parent["line"], "ts": parent["ts"],
+                     "actor": parent["actor"], "text": normalize_text(piece), "gloss": {"source": "pending"},
+                     "history": [], "decoded": {"parent": 0, "depth": depth, "encoding": encoding, "sha256": digest,
+                                                "length": len(token), "truncated": truncated},
+                     _PARENT: parent}
+            yield child
+            if depth < decode.MAX_DEPTH:
+                yield from _decoded_lines(piece, child, in_powershell, depth + 1, budget)
+
+
+def _link_decoded(lines: list[dict]) -> None:
+    """Set each decoded line's parent to its parent line's n, once every line is numbered."""
+    for line in lines:
+        parent = line.pop(_PARENT, None)
+        if parent is not None:
+            line["decoded"]["parent"] = parent["n"]
 
 
 def to_lines(commands: list[RawCommand], sid: int, powershell: bool = False, physical: bool = True) -> list[dict]:
-    """Split, normalize and wrap one file's commands as transcript lines (numbered later)."""
-    return list(iter_lines(commands, sid, powershell, physical))
+    """Split, normalize and wrap one file's commands as transcript lines, numbered from 1."""
+    lines = list(iter_lines(commands, sid, powershell, physical))
+    for n, line in enumerate(lines, start=1):
+        line["n"] = n
+    _link_decoded(lines)
+    return lines
 
 
 def _drain(items: list):
@@ -602,6 +653,7 @@ def parse_paths(paths: list[str | Path], kind: str = "auto", case: str | None = 
         lines.sort(key=lambda line: line["ts"])  # stable: equal timestamps keep file order
     for n, line in enumerate(lines, start=1):
         line["n"] = n
+    _link_decoded(lines)
     # The case name comes from the command line, where a hostile file name can end up, so it is treated as a file
     # name is: normalized (defanged) and escaped.
     if case is not None:
