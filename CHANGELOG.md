@@ -2,6 +2,61 @@
 
 All notable changes to Interlinear are recorded here. Versions follow [Semantic Versioning](https://semver.org/).
 
+## 0.1.1 (2026-10-22)
+
+Fixes from an external review of 0.1.0, which used synthetic intrusions only.
+
+### Glosses
+
+- A rule gloss can now be partial. A rule describes the command it matched; when the line also runs something the
+  rule does not describe (a later pipeline stage that runs a shell, a command substitution, any tool other than one
+  that prints, reads or filters text), the gloss is marked `partial` with the reason and the line still goes to the
+  model, whose gloss replaces it. Before, `echo <base64> | base64 -d | bash` got only T1140 and the model never saw
+  that the decoded content runs.
+- `interlinear pending` lists partial lines with what the rule found (`rule.id`, `rule.techniques`, `rule.partial`),
+  and the Markdown view marks them `[rule: ID; partial]`.
+
+### Decoded payloads
+
+- `interlinear parse` decodes encoded payloads as plain data, never running them: base64 on a line that also decodes
+  base64, and PowerShell `-EncodedCommand` blobs (UTF-16LE). What a payload holds becomes child lines after its line,
+  defanged, with a `decoded` entry that names the parent line, the encoding, the nesting depth and the payload's
+  SHA-256 and length (the blob marker in the parent keeps the same hash). Child lines go through the rules, IOC
+  extraction and the model, and are never labeled context. A payload decodes to at most 64 KiB, a command gives at
+  most 8 payloads and 64 child lines, and payloads inside payloads are decoded to 3 levels. The parse stage is still
+  standard-library Python only.
+
+### Secrets
+
+- `interlinear pending`, whose output the gloss skill sends to a hosted model, now redacts credentials by default:
+  passwords, tokens, keys and hashes become `<redacted KIND>`. `--no-redact-secrets` turns that off.
+- `interlinear render --redact-secrets` redacts the Markdown view the same way. `transcript.json` keeps every
+  credential as evidence.
+
+### Scenario export
+
+- `export-scenario` chains steps only within each source file. Files are parallel lanes, since nothing in them orders
+  one host's history against another's, and each step names its file when there are several. `--source NAME_OR_ID`
+  exports one file alone.
+- Back-to-back lines with the same technique become one step, whatever the actor.
+- A line whose text addresses an analyst or an AI model rather than the target (possible prompt injection) is left
+  out of the scenario, with a warning.
+
+### Rules
+
+- Rule library 2026.10.7: 109 rules. New: `decode-pipe-shell` (T1140, T1059.004), and a Windows, Active Directory and
+  cloud pack of 18 rules: DCSync, NTDS, SAM and LSASS dumps (including comsvcs.dll MiniDump), shadow copy and
+  recovery deletion, Kerberoasting and AS-REP roasting, evil-winrm and NetExec pass the hash, WinRM, NetExec password
+  spraying, PsExec and smbexec, WMI execution, BloodHound collection, credential files such as `~/.aws/credentials`,
+  the cloud metadata service, `sudo -l`, and HTTP uploads with `curl -T` or an `Invoke-WebRequest` POST. Every
+  technique is checked against MITRE ATT&CK 20.0.
+- `sudo -l` was not glossed before; it now gets `sudo-list` (T1548.003).
+
+### Upgrading
+
+- Transcripts written by 0.1.1 carry the new `partial` and `decoded` fields, which 0.1.0 does not read. 0.1.1 reads
+  transcripts written by 0.1.0.
+
 ## 0.1.0 (2026-10-21)
 
 The first release.

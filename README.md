@@ -105,6 +105,17 @@ An agent tool call that holds several commands is glossed one command at a time.
 
 The skill runs on Haiku by default (`model: haiku` in its frontmatter), which matched Opus on meaning and technique in trials on agent transcripts. It ends with a list of the lines it left pending or glossed with low confidence, for an analyst to review with `interlinear annotate`. The skill pre-approves only `interlinear pending` and `apply-glosses`. Rendering the Markdown view and writing each scratch glosses file still ask for permission, by design. `render` itself writes only `.md` files, never an agent instruction file such as `CLAUDE.md`, and never replaces a file it did not write.
 
+## Tests
+
+GitHub Actions does not run for this repository at the moment, so the suite runs locally before each release: on
+Windows, and on Linux in Docker containers for Python 3.10, 3.12 and 3.13.
+
+```bash
+pip install -e ".[dev,countermap]"
+pytest
+interlinear rules test --verify
+```
+
 ## Exit codes
 
 | Code | Meaning |
