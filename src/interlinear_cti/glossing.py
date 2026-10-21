@@ -24,6 +24,7 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints, Validation
 from .model import IOC, Gloss, IocType, Technique, Transcript
 from .normalize import defang, normalize_text
 from .parse import escape_controls
+from .redact import redact
 from .rules import Library, changes_later_commands, gloss_for, partial_reason
 from .textshow import show_controls, show_hidden
 
@@ -129,8 +130,8 @@ def is_open(gloss: Gloss) -> bool:
     return gloss.source == "pending" or (gloss.source == "rule" and bool(gloss.partial))
 
 
-def _pending_row(line) -> dict:
-    row = {"n": line.n, "actor": line.actor, "text": line.text}
+def _pending_row(line, redact_secrets: bool) -> dict:
+    row = {"n": line.n, "actor": line.actor, "text": redact(line.text) if redact_secrets else line.text}
     if line.decoded is not None:
         row["decoded_from"] = line.decoded.parent
     if line.gloss.source == "rule":  # partial: what the rule found, and what it left
@@ -139,12 +140,13 @@ def _pending_row(line) -> dict:
     return row
 
 
-def pending_lines(transcript: Transcript, limit: int = 50, after: int = 0) -> list[dict]:
+def pending_lines(transcript: Transcript, limit: int = 50, after: int = 0, redact_secrets: bool = False) -> list[dict]:
     """Up to limit lines numbered above after that wait for the model (is_open), so a caller can page through them
-    with the last n it saw. A line a rule glossed only in part carries what the rule found."""
+    with the last n it saw. A line a rule glossed only in part carries what the rule found. With redact_secrets, each
+    credential in the text is redacted (redact.redact); the transcript keeps it."""
     if limit < 1:
         raise ValueError("limit must be at least 1")
-    rows = (_pending_row(line) for line in transcript.lines
+    rows = (_pending_row(line, redact_secrets) for line in transcript.lines
             if line.n > after and is_open(line.gloss) and line.actor != "tool_output")
     return list(islice(rows, limit))
 

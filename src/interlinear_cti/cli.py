@@ -138,7 +138,8 @@ def cmd_pending(args: argparse.Namespace) -> int:
     from .glossing import pending_lines
     from .model import load
 
-    rows = pending_lines(load(args.transcript), limit=args.limit, after=args.after)
+    rows = pending_lines(load(args.transcript), limit=args.limit, after=args.after,
+                         redact_secrets=args.redact_secrets)
     print(json.dumps(rows, indent=1, ensure_ascii=False))
     return 0
 
@@ -286,7 +287,7 @@ def cmd_render(args: argparse.Namespace) -> int:
     out = Path(args.output) if args.output else Path(args.transcript).with_suffix(".md")
     _refuse_transcript(args.transcript, out)
     _refuse_other_files(out)
-    _write_text(out, render_markdown(load(args.transcript)))
+    _write_text(out, render_markdown(load(args.transcript), redact_secrets=args.redact_secrets))
     print(f"Wrote {_escaped(str(out))}")
     return 0
 
@@ -342,6 +343,9 @@ def build_parser() -> argparse.ArgumentParser:
     pe.add_argument("--limit", type=_at_least_one, default=50, metavar="N", help="at most N lines (default 50)")
     pe.add_argument("--after", type=int, default=0, metavar="N",
                     help="only lines numbered above N: pass the last n printed to get the next page (default 0)")
+    pe.add_argument("--redact-secrets", action=argparse.BooleanOptionalAction, default=True,
+                    help="replace passwords, tokens, keys and hashes in the text with <redacted KIND>, since this "
+                         "output goes to a model (default; the transcript keeps them)")
     pe.set_defaults(func=cmd_pending)
 
     ap = sub.add_parser("apply-glosses", help="validate model glosses from a JSON file and fill pending lines")
@@ -362,6 +366,9 @@ def build_parser() -> argparse.ArgumentParser:
     rd = sub.add_parser("render", help="write the Markdown interlinear view")
     rd.add_argument("transcript")
     rd.add_argument("-o", "--output", help="default: the transcript path with .md")
+    rd.add_argument("--redact-secrets", action="store_true",
+                    help="replace passwords, tokens, keys and hashes in lines and glosses with <redacted KIND>, for a "
+                         "view that will be shared (the transcript keeps them)")
     rd.set_defaults(func=cmd_render)
 
     ex = sub.add_parser("export-scenario", help="write a Countermap scenario spec from the glossed lines")

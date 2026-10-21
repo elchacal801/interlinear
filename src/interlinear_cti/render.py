@@ -21,6 +21,7 @@ import unicodedata
 from collections import Counter
 
 from .model import Gloss, Line, Technique, Transcript
+from .redact import redact
 from .textshow import code_point, is_hidden
 
 INDENT = " " * 6
@@ -120,11 +121,13 @@ def _rule_versions(transcript: Transcript) -> list[str]:
     return sorted(versions, key=lambda v: [part.zfill(8) for part in v.split(".")])
 
 
-def _block(line: Line, agent: bool) -> list[str]:
+def _block(line: Line, agent: bool, hide=lambda text: text) -> list[str]:
+    """A line's block. hide is applied to every text that came from the line or its gloss: redact.redact for a view
+    with its secrets redacted."""
     if line.actor == "tool_output":
         digest = hashlib.sha256(line.text.encode("utf-8")).hexdigest()[:12]
         return [f"{line.n:>4}  [output: {line.text.count(chr(10)) + 1} lines, sha256 {digest}{ELLIPSIS}]"]
-    first, *rest = line.text.split("\n")
+    first, *rest = hide(line.text).split("\n")
     prefix = f"{ACTOR_TAGS.get(line.actor, '[unknown]')} " if agent else ""
     block = []
     if line.part is not None:
@@ -132,7 +135,7 @@ def _block(line: Line, agent: bool) -> list[str]:
         prefix = f"{ACTOR_TAGS.get(line.actor, '[unknown]')[:-1]} {line.part.index}/{line.part.of}] "
         if line.part.command is not None:
             block.append(INDENT + f"[agent tool call, record line {line.line}, {line.part.of} commands]")
-            block += [INDENT + CALL_MARK + text for text in line.part.command.split("\n")]
+            block += [INDENT + CALL_MARK + text for text in hide(line.part.command).split("\n")]
     if line.decoded is not None:
         prefix += f"[decoded from line {line.decoded.parent}] "
     block += [f"{line.n:>4}  {prefix}{first}", *(INDENT + r for r in rest)]
@@ -141,15 +144,18 @@ def _block(line: Line, agent: bool) -> list[str]:
     tag = _source_tag(g)
     block.append(INDENT + (f"{techniques}   {tag}" if techniques else tag))
     if g.meaning and g.source != "pending":
-        block.append(INDENT + g.meaning)
+        block.append(INDENT + hide(g.meaning))
     if g.partial and g.source == "rule":
         block.append(INDENT + f"partial: {g.partial}")
     if g.note:
-        block.append(INDENT + f"note: {g.note}")
+        block.append(INDENT + f"note: {hide(g.note)}")
     return block
 
 
-def render_markdown(transcript: Transcript) -> str:
+def render_markdown(transcript: Transcript, redact_secrets: bool = False) -> str:
+    """The Markdown view. With redact_secrets, credentials in line text and in glosses are redacted
+    (redact.redact); the transcript keeps them."""
+    hide = redact if redact_secrets else (lambda text: text)
     title = code_span(transcript.case) if transcript.case else "Transcript"
     out = [f"# {title}{TITLE_SUFFIX}", ""]
     described = []
@@ -176,7 +182,7 @@ def render_markdown(transcript: Transcript) -> str:
     for s in transcript.sources:
         lines = [line for line in transcript.lines if line.source == s.id]
         if lines:
-            sections.append((s, "\n\n".join("\n".join(_block(line, agent)) for line in lines)))
+            sections.append((s, "\n\n".join("\n".join(_block(line, agent, hide)) for line in lines)))
     fence = "`" * max(3, _longest_backtick_run([body for _, body in sections]) + 1)
     for s, body in sections:
         out += ["", f"## {code_span(s.name)}", "", f"{fence}text", body, fence]
