@@ -16,7 +16,7 @@ In short:
 
 ### Rule glosses are deterministic
 
-A `rule` gloss comes from a pattern in the rule library (version 2026.10.6 at the time of writing). It has no model in the loop, so the same line gets the same meaning, techniques and IOCs on every run. Its accuracy is the accuracy of the rule: section 3 measures it on a sample.
+A `rule` gloss comes from a pattern in the rule library (version 2026.10.6 at the time of writing; 2026.10.7 in Interlinear 0.1.1, section 4). It has no model in the loop, so the same line gets the same meaning, techniques and IOCs on every run. Its accuracy is the accuracy of the rule: section 3 measures it on a sample.
 
 ### CONTEXT is a default-deny allowlist
 
@@ -96,6 +96,21 @@ The traces were converted to Interlinear's generic agent log format and run thro
 
 This is stricter than these sessions needed. Both agents' tools run each call in a fresh shell: the red tool opens a new SSH exec channel per call, and the blue agent's Bash tool runs each command in a separate process, so environment variables, functions and aliases set in one call do not reach the next (the blue tool does keep the working directory). Interlinear does not assume that, and treats the whole session as one taint unit. The zero is therefore what a conservative design should produce here, not a test of the gates against a hostile transcript. Section 2 is that test.
 
+### Re-run with Interlinear 0.1.1
+
+The same JSONL was parsed and glossed again with 0.1.1 (rules 2026.10.7: a decode-pipe-shell rule, a Windows, Active Directory and cloud pack, partial rule glosses, decoded payloads and redaction in `pending`), in the same sandbox.
+
+| Side | Lines | Rule, 0.1.0 to 0.1.1 | Of which partial | CONTEXT | Pending |
+|---|---|---|---|---|---|
+| Red | 1,541 | 118 (7.7%) to 129 (8.4%) | 2 | 4 (0.3%) | 1,408 (91.4%) |
+| Blue | 987 | 335 (33.9%) to 336 (34.0%) | 7 | 11 (1.1%) | 640 (64.8%) |
+
+- **Wrong CONTEXT: still 0.** Partial lines go to the model as well as pending ones.
+- **New rules:** 12 hits on red (`impacket-secretsdump` against the domain controller as DCSync 6, `sudo -l` 3, Kerberoasting 1, NetExec password spraying 1) and 1 on blue (a `.env` file read). All 12 red hits were judged correct by hand.
+- **One rule corrected on this data.** The first 0.1.1 run also glossed 3 red lines as HTTP exfiltration. All three were the attacker uploading its own scratch files to the target's upload form, which is ingress. The command does not show the direction, so `http-upload` now claims only a file that looks like host data (a system, home or user folder; an archive, database, document, dump, backup or key) and leaves the rest to the model. The rule was wrong on any such input; the fix was not fitted to the numbers.
+- **Redaction.** A scan of the text `pending` sends to the model found one password left visible: impacket's `domain/user:password` with the host given by `-dc-ip`. That form, and literal cookie values, are now redacted. Passwords in form data (`password=...`) and `PGPASSWORD=` were already redacted.
+- **No decoded payloads.** None of these episodes holds base64 or `-EncodedCommand` text that decodes to text, so the decoder was not exercised here; its tests use synthetic intrusions.
+
 ## 5. Model-tier trials
 
 **Method.** Two trials, each on 50 distinct pending lines from the same transcripts (30 red, 20 blue, spread across command families, with few trivial lines such as comments and echoes). Secrets were masked before any model saw the lines. Each model glossed the same lines under the gloss skill's rules (meaning, ATT&CK IDs, context flag, confidence). A reference key was written before any model output was read: acceptable technique IDs at parent level for each line, and a flag on every line that performs an action, where a context label would be a serious miss.
@@ -131,4 +146,4 @@ This is stricter than these sessions needed. Both agents' tools run each call in
 - **A lenient key.** Techniques were scored at parent level, and a gloss counted as acceptable if it named any of the techniques the key allowed for the line.
 - **An Opus-family judge.** The model trials were scored by a session running an Opus-family model, which may favor Opus.
 - **Text limits.** In the first model trial, five long lines reached the models shortened. The second trial capped every line at 350 characters, so very long calls were judged on their first part.
-- **Evaluation, not tuning.** No threshold or rule was fitted to these numbers. The two rule fixes in section 3 correct rules that were wrong on any input.
+- **Evaluation, not tuning.** No threshold or rule was fitted to these numbers. The two rule fixes in section 3 and the `http-upload` fix in section 4 correct rules that were wrong on any input.

@@ -14,7 +14,14 @@ Fixes from an external review of 0.1.0, which used synthetic intrusions only.
   model, whose gloss replaces it. Before, `echo <base64> | base64 -d | bash` got only T1140 and the model never saw
   that the decoded content runs.
 - `interlinear pending` lists partial lines with what the rule found (`rule.id`, `rule.techniques`, `rule.partial`),
-  and the Markdown view marks them `[rule: ID; partial]`.
+  and the Markdown view marks them `[rule: ID; partial]`. `crontab -l` counts as read-only, so the usual
+  `(crontab -l; echo ...) | crontab -` append stays a whole `cron` gloss.
+- A word with `=` after the command word is an argument, not an assignment, so `echo <base64>== | base64 -d` no longer
+  ends context for the rest of its file. Before the command word, and as an argument of `export`, `declare`,
+  `typeset`, `local`, `readonly` or `let`, it still does. Every default-deny probe still passes.
+- A line whose text addresses whoever reads the transcript ("ignore all previous instructions", "note to the
+  reviewer") is never labeled context, is marked `aimed_at_reader` in `pending`, and gets a warning in the Markdown
+  view.
 
 ### Decoded payloads
 
@@ -32,6 +39,10 @@ Fixes from an external review of 0.1.0, which used synthetic intrusions only.
   passwords, tokens, keys and hashes become `<redacted KIND>`. `--no-redact-secrets` turns that off.
 - `interlinear render --redact-secrets` redacts the Markdown view the same way. `transcript.json` keeps every
   credential as evidence.
+- Forms covered include `--password` and `-Password`, `-p` to tools that take a password, `user:password@host`,
+  impacket's `domain/user:password`, `net user NAME PASSWORD`, credential-named variables, `Authorization` and
+  `Cookie` headers, and AWS, GitHub, Anthropic, OpenAI and Slack token formats and JWTs. Redaction is a best effort,
+  not a guarantee.
 
 ### Scenario export
 
@@ -48,14 +59,17 @@ Fixes from an external review of 0.1.0, which used synthetic intrusions only.
   cloud pack of 18 rules: DCSync, NTDS, SAM and LSASS dumps (including comsvcs.dll MiniDump), shadow copy and
   recovery deletion, Kerberoasting and AS-REP roasting, evil-winrm and NetExec pass the hash, WinRM, NetExec password
   spraying, PsExec and smbexec, WMI execution, BloodHound collection, credential files such as `~/.aws/credentials`,
-  the cloud metadata service, `sudo -l`, and HTTP uploads with `curl -T` or an `Invoke-WebRequest` POST. Every
+  the cloud metadata service, `sudo -l`, and HTTP uploads of host data (a system, home or user file, or an archive,
+  database, document, dump, backup or key) with `curl -T`, a form upload or an `Invoke-WebRequest` POST. Every
   technique is checked against MITRE ATT&CK 20.0.
+- On the OpenRAE Duels agent traces, rule coverage of red tool lines went from 7.7% to 8.4%, with no line wrongly
+  labeled context. docs/evaluation.md has the details.
 - `sudo -l` was not glossed before; it now gets `sudo-list` (T1548.003).
 
 ### Upgrading
 
-- Transcripts written by 0.1.1 carry the new `partial` and `decoded` fields, which 0.1.0 does not read. 0.1.1 reads
-  transcripts written by 0.1.0.
+- 0.1.1 reads transcripts written by 0.1.0. It writes the new `partial` and `decoded` fields only when a line has
+  them, so 0.1.0 still reads a 0.1.1 transcript that has none; one that has them needs 0.1.1.
 
 ## 0.1.0 (2026-10-21)
 
