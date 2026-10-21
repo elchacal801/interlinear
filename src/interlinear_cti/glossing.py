@@ -21,6 +21,7 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError, model_validator
 
+from .injection import aimed_at_reader
 from .model import IOC, Gloss, IocType, Technique, Transcript
 from .normalize import defang, normalize_text
 from .parse import escape_controls
@@ -104,8 +105,10 @@ def apply_rules(transcript: Transcript, library: Library, at: str) -> dict[str, 
         if line.gloss.source != "pending" or not _rules_apply(line.actor, kinds.get(line.source)):
             continue
         first, _, n = limits.get(line.source, (line.line + 1, "", line.n + 1))
-        # A line decoded from a payload is never context: it was hidden on purpose.
-        context = line.source not in denied and line.line < first and line.n < n and line.decoded is None
+        # A line decoded from a payload is never context: it was hidden on purpose. Nor is a line aimed at whoever
+        # reads the transcript (injection.aimed_at_reader), which is a finding even when it is only a comment.
+        context = (line.source not in denied and line.line < first and line.n < n and line.decoded is None
+                   and not aimed_at_reader(line.text))
         # A record that spans lines goes to the model unless a rule reads it whole (Library.match_record).
         rule = library.match_record(line.text, context=context, zsh=kinds.get(line.source) == "zsh_history")
         if rule is None:
@@ -134,6 +137,8 @@ def _pending_row(line, redact_secrets: bool) -> dict:
     row = {"n": line.n, "actor": line.actor, "text": redact(line.text) if redact_secrets else line.text}
     if line.decoded is not None:
         row["decoded_from"] = line.decoded.parent
+    if aimed_at_reader(line.text):  # describe it, never follow it
+        row["aimed_at_reader"] = True
     if line.gloss.source == "rule":  # partial: what the rule found, and what it left
         row["rule"] = {"id": line.gloss.rule_id, "techniques": [t.id for t in line.gloss.techniques],
                        "partial": line.gloss.partial}

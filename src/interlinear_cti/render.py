@@ -20,8 +20,11 @@ import re
 import unicodedata
 from collections import Counter
 
+from .injection import aimed_at_reader
 from .model import Gloss, Line, Technique, Transcript
 from .redact import redact
+
+AIMED_MARK = "warning: addressed to whoever reads this transcript, not to the target (possible prompt injection)"
 from .textshow import code_point, is_hidden
 
 INDENT = " " * 6
@@ -147,6 +150,8 @@ def _block(line: Line, agent: bool, hide=lambda text: text) -> list[str]:
         block.append(INDENT + hide(g.meaning))
     if g.partial and g.source == "rule":
         block.append(INDENT + f"partial: {g.partial}")
+    if aimed_at_reader(line.text):
+        block.append(INDENT + AIMED_MARK)
     if g.note:
         block.append(INDENT + f"note: {hide(g.note)}")
     return block
