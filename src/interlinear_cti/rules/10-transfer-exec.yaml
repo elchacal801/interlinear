@@ -305,6 +305,30 @@
       - "chmod 711 /home/john"
       - "chmod -R u+rwX /srv/app"
 
+# Decoded content piped into a shell. Linear for the reason download-pipe-shell is: the scan from a base64 word stops at
+# the next one, so no two starts scan the same text.
+- id: decode-pipe-shell
+  match:
+    regex: '(?i)(?<![\w.-])base64(?![\w-])(?:[^\S\n]+-w[^\S\n]+[0-9]+|[^\S\n]+-{word}*){0,8}?[^\S\n]+-(?:(?=[a-z]*d)[a-z]+|-decode){end}(?:(?!(?<![\w.-])base64(?![\w-])).)*?\|[^\S\n]*{pre}(?:ba|z|da|k|a)?sh{end}(?![^\S\n]+-[A-Za-z]*c)'
+  meaning: Decodes base64-encoded content and pipes it into a shell, so a hidden command runs without being shown.
+  techniques: [T1140, T1059.004]
+  artifacts: [Script, Shell Script]
+  iocs: []
+  confidence: high
+  platforms: [linux, macos]
+  examples:
+    match:
+      - "echo aWQ= | base64 -d | bash"
+      - "echo aWQ= | base64 --decode | sh"
+      - "base64 -d <<< aWQ= | bash"
+      - "cat p.b64 | base64 -di | sudo bash -"
+      - "echo aWQ= | base64 -D | zsh"
+    no_match:
+      - "echo aWQ= | base64 -d"
+      - "echo aWQ= | base64 -d | sh -c 'cat > /tmp/x'"
+      - "echo aWQ= | base64 | bash"
+      - "echo aWQ= | base64 -d > /tmp/x; bash /tmp/x"
+
 - id: base64-decode
   match:
     regex: '(?i){stage}base64(?:[^\S\n]+-w[^\S\n]+[0-9]+|[^\S\n]+-{word}*){0,8}?[^\S\n]+-(?:(?=[a-z]*d)[a-z]+|-decode){end}|\[(?:system\.)?convert\]::frombase64string\s*\('

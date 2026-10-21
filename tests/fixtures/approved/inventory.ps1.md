@@ -2,7 +2,7 @@
 
 Sources: `inventory.ps1` (sha256 `89778de22911`…, 4 lines)
 
-Glosses: 3 rule, 0 model, 0 analyst, 1 none, 0 pending · rules `2026.10.6` · ATT&CK `20.0`
+Glosses: 3 rule, 0 model, 0 analyst, 1 none, 0 pending · rules `2026.10.7` · ATT&CK `20.0`
 
 ## `inventory.ps1`
 

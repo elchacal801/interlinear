@@ -48,6 +48,10 @@ class Gloss(_Strict):
     note: str | None = None
     by: str | None = None
     at: str | None = None
+    # Set on a rule gloss whose line also runs something the rule does not describe, such as a later pipeline stage
+    # that runs a shell (rules.partial_reason): why. The rule's techniques still hold, and the line also goes to the
+    # model, whose gloss replaces this one.
+    partial: str | None = None
 
 
 class Source(_Strict):

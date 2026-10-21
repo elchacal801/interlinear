@@ -2,7 +2,7 @@
 
 Sources: `zsh_history` (sha256 `90dbab2134a2`…, 4 lines)
 
-Glosses: 3 rule, 0 model, 0 analyst, 0 none, 1 pending · rules `2026.10.6` · ATT&CK `20.0`
+Glosses: 3 rule, 0 model, 0 analyst, 0 none, 1 pending · rules `2026.10.7` · ATT&CK `20.0`
 
 ## `zsh_history`
 

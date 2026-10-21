@@ -96,7 +96,7 @@ def is_render_header(line: str) -> bool:
 
 def _source_tag(g: Gloss) -> str:
     if g.source == "rule":
-        return f"[rule: {g.rule_id}]"
+        return f"[rule: {g.rule_id}; partial]" if g.partial else f"[rule: {g.rule_id}]"
     if g.source in ("model", "analyst"):
         # A model's or analyst's confidence is part of the tag, so a low guess never reads like a high one. With no
         # techniques, the gloss marks a context line; the tag still says who marked it.
@@ -140,6 +140,8 @@ def _block(line: Line, agent: bool) -> list[str]:
     block.append(INDENT + (f"{techniques}   {tag}" if techniques else tag))
     if g.meaning and g.source != "pending":
         block.append(INDENT + g.meaning)
+    if g.partial and g.source == "rule":
+        block.append(INDENT + f"partial: {g.partial}")
     if g.note:
         block.append(INDENT + f"note: {g.note}")
     return block
@@ -157,6 +159,9 @@ def render_markdown(transcript: Transcript) -> str:
     out += ["Sources: " + "; ".join(described), ""]
     counts = Counter(line.gloss.source for line in transcript.lines if line.actor != "tool_output")
     summary = ", ".join(f"{counts.get(k, 0)} {k}" for k in ("rule", "model", "analyst", "none", "pending"))
+    partial = sum(1 for line in transcript.lines if line.gloss.source == "rule" and line.gloss.partial)
+    if partial:  # a rule gloss of part of a line, which the model may still replace
+        summary = summary.replace(" rule,", f" rule ({partial} partial),", 1)
     extra = []
     versions = _rule_versions(transcript)
     if versions:

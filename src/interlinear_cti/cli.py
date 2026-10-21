@@ -128,8 +128,9 @@ def cmd_gloss(args: argparse.Namespace) -> int:
         transcript.datasets = resolver.versions()
     _save(transcript, args.transcript)
     pending = sum(1 for line in transcript.lines if line.gloss.source == "pending")
+    partial = f" ({counts['partial']} partial, also left to the model)" if counts.get("partial") else ""
     print(f"Glossed {_escaped(args.transcript)} with rules {library.version}: "
-          f"{counts.get('rule', 0)} rule, {counts.get('none', 0)} context; {pending} still pending")
+          f"{counts.get('rule', 0)} rule{partial}, {counts.get('none', 0)} context; {pending} still pending")
     return 0
 
 

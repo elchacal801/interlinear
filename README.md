@@ -10,7 +10,11 @@ Interlinear turns attacker shell histories, dropped scripts and AI-agent transcr
 | `none` | A context line the rule library recognized, such as `cd` or `ls`, or tool output, which is never glossed |
 | `pending` | Not glossed yet |
 
-A `model` or `analyst` gloss with no techniques marks a context line, and keeps its source. [docs/evaluation.md](https://github.com/elchacal801/interlinear/blob/main/docs/evaluation.md) says how far to trust each source and how that was tested, and [docs/design.md](https://github.com/elchacal801/interlinear/blob/main/docs/design.md) explains how Interlinear is built.
+A `model` or `analyst` gloss with no techniques marks a context line, and keeps its source.
+
+A `rule` gloss can be partial. A rule describes the command it matched; when the line also runs something the rule does not describe, such as `python3 gen.py | base64 -d` or `bash -c "$(echo ... | base64 -d)"`, the gloss is marked `partial` with the reason, and the line still goes to the model. Outside the matched command, only commands that print, read or filter text (`echo`, `cat`, `grep`, `head`, `sort` and the like) leave a rule gloss whole. A model gloss of the line replaces the partial one, which moves to the line's history.
+
+[docs/evaluation.md](https://github.com/elchacal801/interlinear/blob/main/docs/evaluation.md) says how far to trust each source and how that was tested, and [docs/design.md](https://github.com/elchacal801/interlinear/blob/main/docs/design.md) explains how Interlinear is built.
 
 ### What the CONTEXT label means
 

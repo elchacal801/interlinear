@@ -24,7 +24,7 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints, Validation
 from .model import IOC, Gloss, IocType, Technique, Transcript
 from .normalize import defang, normalize_text
 from .parse import escape_controls
-from .rules import Library, changes_later_commands, gloss_for
+from .rules import Library, changes_later_commands, gloss_for, partial_reason
 from .textshow import show_controls, show_hidden
 
 # Rules gloss commands only. Agent reasoning, chat typed into an agent (an agent log's operator lines) and an agent
@@ -114,18 +114,35 @@ def apply_rules(transcript: Transcript, library: Library, at: str) -> dict[str, 
             if gloss.confidence == "high":
                 gloss.confidence = "medium"
             gloss.note = UNKNOWN_FORMAT_NOTE
+        gloss.partial = partial_reason(rule, line.text)  # then the line goes to the model too
         line.gloss = gloss
         counts[line.gloss.source] += 1
+        if gloss.partial:
+            counts["partial"] += 1
     transcript.rules_version = library.version
     return dict(counts)
 
 
+def is_open(gloss: Gloss) -> bool:
+    """Whether a line still waits for the model: it is pending, or a rule glossed only part of it (Gloss.partial)."""
+    return gloss.source == "pending" or (gloss.source == "rule" and bool(gloss.partial))
+
+
+def _pending_row(line) -> dict:
+    row = {"n": line.n, "actor": line.actor, "text": line.text}
+    if line.gloss.source == "rule":  # partial: what the rule found, and what it left
+        row["rule"] = {"id": line.gloss.rule_id, "techniques": [t.id for t in line.gloss.techniques],
+                       "partial": line.gloss.partial}
+    return row
+
+
 def pending_lines(transcript: Transcript, limit: int = 50, after: int = 0) -> list[dict]:
-    """Up to limit pending lines numbered above after, so a caller can page through them with the last n it saw."""
+    """Up to limit lines numbered above after that wait for the model (is_open), so a caller can page through them
+    with the last n it saw. A line a rule glossed only in part carries what the rule found."""
     if limit < 1:
         raise ValueError("limit must be at least 1")
-    rows = ({"n": line.n, "actor": line.actor, "text": line.text} for line in transcript.lines
-            if line.n > after and line.gloss.source == "pending" and line.actor != "tool_output")
+    rows = (_pending_row(line) for line in transcript.lines
+            if line.n > after and is_open(line.gloss) and line.actor != "tool_output")
     return list(islice(rows, limit))
 
 
@@ -268,7 +285,7 @@ def apply_glosses(transcript: Transcript, entries: list, *, source: str, by: str
             problem = "no such line"
         elif line.actor == "tool_output":
             problem = "tool output is not glossed"
-        elif source == "model" and line.gloss.source != "pending":
+        elif source == "model" and not is_open(line.gloss):
             problem = f"already glossed ({line.gloss.source}); model glosses only fill pending lines"
         elif entry.context and entry.techniques:
             problem = "a context gloss carries no techniques"

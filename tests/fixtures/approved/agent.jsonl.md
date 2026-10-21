@@ -2,7 +2,7 @@
 
 Sources: `agent.jsonl` (sha256 `4d82f47b2127`…, 9 lines)
 
-Glosses: 2 rule, 0 model, 0 analyst, 2 none, 4 pending · rules `2026.10.6` · ATT&CK `20.0`
+Glosses: 2 rule, 0 model, 0 analyst, 2 none, 4 pending · rules `2026.10.7` · ATT&CK `20.0`
 
 ## `agent.jsonl`
 

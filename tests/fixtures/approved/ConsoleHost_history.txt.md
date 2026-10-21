@@ -2,7 +2,7 @@
 
 Sources: `ConsoleHost_history.txt` (sha256 `43ad91803155`…, 5 lines)
 
-Glosses: 5 rule, 0 model, 0 analyst, 0 none, 0 pending · rules `2026.10.6` · ATT&CK `20.0`
+Glosses: 5 rule, 0 model, 0 analyst, 0 none, 0 pending · rules `2026.10.7` · ATT&CK `20.0`
 
 ## `ConsoleHost_history.txt`
 

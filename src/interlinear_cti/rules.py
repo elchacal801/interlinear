@@ -641,6 +641,195 @@ def changes_later_commands(text: str) -> str | None:
     return None
 
 
+# Partial matches. A rule describes the command it matched. A line that also runs a command the rule does not
+# describe (a later pipeline stage that runs a shell, a command substitution, any tool the rule does not name) keeps
+# the rule's gloss, marked partial, and still goes to the model. The test is default-deny: outside the part of the
+# line the rule matched, only the commands below, which print, read or filter text, leave the gloss whole.
+_PLAIN_COMMANDS = frozenset((
+    "echo", "printf", "cat", "type", "grep", "egrep", "fgrep", "head", "tail", "sort", "uniq", "wc", "cut", "tr",
+    "column", "nl", "fold", "rev", "less", "more", "jq", "xxd", "od", "hexdump", "strings", "md5sum", "sha1sum",
+    "sha256sum", "sha512sum", "true", "false",
+    # PowerShell's and cmd's
+    "write-output", "write-host", "select-object", "select-string", "sort-object", "format-table", "format-list",
+    "out-string", "out-null", "measure-object", "findstr", "get-content", "gc",
+))
+_INTERPRETER = re.compile(r"(?:ba|z|da|k|a|c|tc|fi)?sh|python[0-9.]*|perl[0-9.]*|ruby[0-9.]*|php[0-9.]*|node|nodejs"
+                          r"|lua[0-9.]*|tclsh|osascript|powershell|pwsh|cmd|iex|invoke-expression|eval|source|\."
+                          r"|wscript|cscript|mshta", re.ASCII)
+# Words that come before a command word and run it: they are skipped to find the command.
+_RUNS_NEXT = frozenset(("sudo", "doas", "nohup", "time", "nice", "timeout", "stdbuf", "setsid", "command", "exec",
+                        "builtin", "env", "busybox", "!", "{", "}", "if", "then", "do", "else", "elif", "while",
+                        "until", "coproc", "noglob", "nocorrect"))
+_SUDO_ARGUMENT = re.compile(r"-[A-Za-z]*[CDghprtTUu]", re.ASCII)  # a sudo or doas option that takes the next word
+_SHOWN_NAME = re.compile(r"\.|[a-z0-9][a-z0-9._+-]{0,31}", re.ASCII)
+_MAX_COMMANDS = 64  # a line with more commands than this is partial, unchecked
+_EXPANDED_WORD = "$"  # stands for a command word the shell expands
+
+
+def _command_name(words: list[str]) -> str | None:
+    """The command a simple command runs, from its words with quotes removed: wrappers such as sudo, env and
+    timeout, their options, assignments and redirections are skipped, any path is cut off, and the name is in lower
+    case without .exe. A word the shell expands is _EXPANDED_WORD."""
+    skip = False
+    wrapper = ""
+    for word in words:
+        if skip:
+            skip = False
+            continue
+        if not word or _ASSIGNED.match(word):
+            continue
+        redirection = _REDIRECTION.match(word)
+        if redirection is not None:
+            skip = redirection.end() == len(word)  # the target is the next word
+            continue
+        if wrapper and word.startswith("-") and len(word) > 1:
+            skip = ((wrapper in ("sudo", "doas") and _SUDO_ARGUMENT.fullmatch(word) is not None)
+                    or (wrapper, word) in (("nice", "-n"), ("env", "-u")))
+            continue
+        if wrapper == "timeout":
+            wrapper = "timed"  # the duration
+            continue
+        if any(ch in _EXPANDED for ch in word):
+            return _EXPANDED_WORD
+        name = re.split(r"[/\\]", word)[-1].lower().removesuffix(".exe")
+        if name in _RUNS_NEXT:
+            wrapper = name
+            continue
+        return name
+    return None
+
+
+def _commands(text: str) -> list[tuple[int, str | None]]:
+    """Each simple command in a one-line text, at any depth: pipeline stages and lists, subshells, and command and
+    process substitutions in or out of double quotes. For each: where it starts, and its command (_command_name).
+    Linear, and loose on purpose: finding more commands only costs model calls."""
+    starts: list[int] = [0]
+    words: list[list[str]] = [[]]
+    current = 0
+    plain: list[str] = []
+    in_word = False
+    quote = ""
+    # For each open $( <( >( ( or backtick: its closer, whether it expands into the word around it (not a subshell's
+    # parenthesis), and the quote and word state to restore.
+    stack: list[tuple[str, bool, str, int, list[str], bool]] = []
+
+    def end_word() -> None:
+        nonlocal in_word
+        if in_word:
+            words[current].append("".join(plain))
+            plain.clear()
+            in_word = False
+
+    def open_command(at: int) -> None:
+        nonlocal current
+        starts.append(at)
+        words.append([])
+        current = len(starts) - 1
+
+    def push(closer: str, at: int, expands: bool = True) -> None:
+        nonlocal quote, plain, in_word
+        stack.append((closer, expands, quote, current, plain, in_word))
+        quote, plain, in_word = "", [], False
+        open_command(at)
+
+    def pop() -> None:
+        nonlocal quote, plain, in_word, current
+        end_word()
+        _, expands, quote, current, plain, in_word = stack.pop()
+        if expands:
+            plain.append(_EXPANDED_WORD)  # the outer word holds an expansion
+            in_word = True
+
+    i, n = 0, len(text)
+    while i < n:
+        ch = text[i]
+        if quote == "'":
+            if ch == "'":
+                quote = ""
+            else:
+                plain.append(ch)
+            i += 1
+            continue
+        if ch == "\\" and i + 1 < n:
+            plain.append(text[i + 1])
+            in_word = True
+            i += 2
+            continue
+        if ch == "`":
+            if stack and stack[-1][0] == "`":
+                pop()
+            else:
+                push("`", i + 1)
+            i += 1
+            continue
+        if text.startswith("$(", i) or (not quote and text.startswith(("<(", ">("), i)):
+            push(")", i + 2)
+            i += 2
+            continue
+        if quote == '"':
+            if ch == '"':
+                quote = ""
+            else:
+                plain.append(ch)
+            i += 1
+            continue
+        if ch in "'\"":
+            quote = ch
+            in_word = True
+        elif ch == ")":
+            if stack and stack[-1][0] == ")":
+                pop()
+        elif ch == "(":
+            end_word()
+            push(")", i + 1, expands=False)
+        elif ch in " \t":
+            end_word()
+        elif ch in "|;\n" or (ch == "&" and not (i and text[i - 1] in "<>") and not text.startswith("&>", i)):
+            end_word()
+            while i + 1 < n and text[i + 1] in "|&;":
+                i += 1
+            open_command(i + 1)
+        else:
+            plain.append(ch)
+            in_word = True
+        i += 1
+    end_word()
+    return [(start, _command_name(said)) for start, said in zip(starts, words)]
+
+
+def partial_reason(rule: Rule, text: str) -> str | None:
+    """Why a rule's gloss of a one-line text is partial, or None when the rule describes all the line runs.
+
+    The rule claims the part of the text it matches from the latest command start at which it still matches, so
+    python3 gen.py | base64 -d claims only base64 -d, while curl ... | bash claims both commands. Every command that
+    starts outside that part must print, read or filter text (_PLAIN_COMMANDS); anything else, a shell or interpreter
+    above all, makes the gloss partial. A context rule's gloss, and a record that spans lines (only a plain heredoc
+    write is claimed then), are never partial.
+    """
+    if rule.context or "\n" in text:
+        return None
+    commands = _commands(text)
+    if len(commands) > _MAX_COMMANDS:
+        return f"the line runs more than {_MAX_COMMANDS} commands, too many to check against the rule"
+    lo, hi = 0, len(text)
+    for start in sorted({start for start, _ in commands}, reverse=True):
+        found = rule.regex.search(text[start:])
+        if found is not None:
+            lo, hi = start, start + found.end()
+            break
+    # A command with no command word (only assignments or redirections) runs nothing.
+    outside = [name for start, name in commands
+               if not lo <= start < hi and name is not None and name not in _PLAIN_COMMANDS]
+    if not outside:
+        return None
+    name = next((name for name in outside if _INTERPRETER.fullmatch(name)), outside[0])
+    if name == _EXPANDED_WORD:
+        return "the line also runs a command word the shell expands, which this rule does not describe"
+    shown = name if _SHOWN_NAME.fullmatch(name) else "another command"
+    kind = ", a shell or interpreter," if _INTERPRETER.fullmatch(name) else ","
+    return f"the line also runs {shown}{kind} which this rule does not describe"
+
+
 @dataclass
 class Rule:
     id: str

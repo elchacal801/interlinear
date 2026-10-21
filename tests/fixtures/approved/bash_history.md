@@ -2,7 +2,7 @@
 
 Sources: `bash_history` (sha256 `76691a8c0bb5`…, 11 lines)
 
-Glosses: 7 rule, 0 model, 0 analyst, 1 none, 3 pending · rules `2026.10.6` · ATT&CK `20.0`
+Glosses: 7 rule, 0 model, 0 analyst, 1 none, 3 pending · rules `2026.10.7` · ATT&CK `20.0`
 
 ## `bash_history`
 
