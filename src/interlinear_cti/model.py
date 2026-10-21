@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Literal
+from typing import ClassVar, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_serializer
 
 from . import fileio
 
@@ -24,6 +24,21 @@ class _Strict(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class _OmitsUnsetAdditions(_Strict):
+    """A model with fields added after 0.1.0 (_ADDED). Each is written only when set, so a transcript that uses none
+    of them is still one that 0.1.0, which rejects unknown keys, can read."""
+
+    _ADDED: ClassVar[tuple[str, ...]] = ()
+
+    @model_serializer(mode="wrap")
+    def _omit_unset(self, handler):
+        data = handler(self)
+        for name in self._ADDED:
+            if data.get(name) is None:
+                data.pop(name, None)
+        return data
+
+
 class Technique(_Strict):
     id: str
     framework: Literal["attack", "atlas"] = "attack"
@@ -37,7 +52,8 @@ class IOC(_Strict):
     value: str
 
 
-class Gloss(_Strict):
+class Gloss(_OmitsUnsetAdditions):
+    _ADDED: ClassVar[tuple[str, ...]] = ("partial",)
     source: GlossSource = "pending"
     rule_id: str | None = None
     meaning: str | None = None
@@ -93,7 +109,8 @@ class Decoded(_Strict):
     truncated: bool = False
 
 
-class Line(_Strict):
+class Line(_OmitsUnsetAdditions):
+    _ADDED: ClassVar[tuple[str, ...]] = ("decoded",)
     n: int
     source: int
     line: int
