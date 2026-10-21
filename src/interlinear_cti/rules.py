@@ -531,6 +531,8 @@ _REDIRECTION = re.compile(r"[0-9]*(?:[<>]|&>)[<>&|-]*", re.ASCII)
 _EXPANDED = frozenset("$`*?[{")
 # Builtins that assign to the names they are given (read NAME, for NAME in, printf -v NAME).
 _NAMING = frozenset(("read", "mapfile", "readarray", "vared", "getopts", "for", "select"))
+# Builtins whose NAME=value arguments are assignments in the shell itself.
+_DECLARING = frozenset(("export", "declare", "typeset", "local", "readonly", "let", "integer", "float", "alias"))
 _LEADING_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*", re.ASCII)
 _PLAIN_NAME = re.compile(_Q_NAME + r"\Z", re.ASCII)  # a name the context grammar accepts as assigned
 
@@ -609,7 +611,9 @@ def changes_later_commands(text: str) -> str | None:
             if skip:
                 skip = False
                 continue
-            assigned = _ASSIGNED.match(word)
+            # NAME=value assigns only before the command word or as an argument of a builtin that declares names;
+            # after any other command it is an argument, such as base64 padding or make's CC=gcc.
+            assigned = _ASSIGNED.match(word) if command is None or command in _DECLARING else None
             if assigned is not None:
                 if not _plain_name(assigned.group()):
                     return "an assignment to a special, uppercase or credential name"

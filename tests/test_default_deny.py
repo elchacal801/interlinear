@@ -288,3 +288,24 @@ def test_plainly_literal(text, zsh, expected):
                                   "ls *.log", "cat /etc/passwd", "echo $HOME"])
 def test_ordinary_lines_change_nothing(text):
     assert rules.changes_later_commands(text) is None
+
+
+# A word with = after the command word is an argument, not an assignment: base64 padding (echo Y2QgL3RtcA==), make's
+# variables, env's and sudo's per-command environment. Only a prefix assignment, or a name given to a builtin that
+# declares or assigns it, changes later commands.
+@pytest.mark.parametrize("text", ["echo Y2QgL3RtcA== | base64 -d", "make CC=gcc", "grep -E X=1 f", "env FOO=1 ls",
+                                  "sudo FOO=1 ls", "echo a=b C=d", "curl -d A=b x"])
+def test_argument_words_with_an_equals_sign_change_nothing(text):
+    assert rules.changes_later_commands(text) is None
+
+
+@pytest.mark.parametrize("text", ["FOO=bar", "FOO=bar ls", "export FOO=bar", "declare FOO=1", "local Foo=1",
+                                  "readonly X=1", "typeset X=1", "let X=1", "command export X=1",
+                                  "if true; then X=1; fi", "ls; X=1", "echo a | X=1 cat"])
+def test_assignments_still_change_later_commands(text):
+    assert rules.changes_later_commands(text) is not None
+
+
+def test_a_padded_base64_argument_leaves_later_lines_context(tmp_path, library):
+    t = glossed(tmp_path, library, ".bash_history", b"echo Y2QgL3RtcA== | base64 -d\ncd /tmp\n")
+    assert t.lines[-1].text == "cd /tmp" and t.lines[-1].gloss.source == "none"
