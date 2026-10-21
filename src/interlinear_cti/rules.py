@@ -656,7 +656,10 @@ _PLAIN_COMMANDS = frozenset((
     # PowerShell's and cmd's
     "write-output", "write-host", "select-object", "select-string", "sort-object", "format-table", "format-list",
     "out-string", "out-null", "measure-object", "findstr", "get-content", "gc",
+    # read-only forms of other commands (_command_name): crontab -l, as in (crontab -l; echo ...) | crontab -
+    "crontab -l",
 ))
+_CRONTAB_LIST = "crontab -l"
 _INTERPRETER = re.compile(r"(?:ba|z|da|k|a|c|tc|fi)?sh|python[0-9.]*|perl[0-9.]*|ruby[0-9.]*|php[0-9.]*|node|nodejs"
                           r"|lua[0-9.]*|tclsh|osascript|powershell|pwsh|cmd|iex|invoke-expression|eval|source|\."
                           r"|wscript|cscript|mshta", re.ASCII)
@@ -676,7 +679,7 @@ def _command_name(words: list[str]) -> str | None:
     case without .exe. A word the shell expands is _EXPANDED_WORD."""
     skip = False
     wrapper = ""
-    for word in words:
+    for k, word in enumerate(words):
         if skip:
             skip = False
             continue
@@ -699,8 +702,27 @@ def _command_name(words: list[str]) -> str | None:
         if name in _RUNS_NEXT:
             wrapper = name
             continue
+        if name == "crontab" and _lists_crontab(words[k + 1:]):
+            return _CRONTAB_LIST
         return name
     return None
+
+
+def _lists_crontab(words: list[str]) -> bool:
+    """Whether crontab's arguments only list a crontab: -l, with -u USER and redirections at most."""
+    listed, skip = False, False
+    for word in words:
+        if skip:
+            skip = False
+        elif word == "-l":
+            listed = True
+        elif word == "-u":
+            skip = True
+        elif (redirection := _REDIRECTION.match(word)) is not None:
+            skip = redirection.end() == len(word)
+        else:
+            return False
+    return listed
 
 
 def _commands(text: str) -> list[tuple[int, str | None]]:

