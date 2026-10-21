@@ -463,7 +463,7 @@ def test_low_descriptors_stay_context(library, text, rule_id):
     ("sudo -u root -i", "sudo-shell"),
     ("sudo -i whoami", "whoami-id"),
     ("su -", "switch-user"),
-    ("sudo -l", None),
+    ("sudo -l", "sudo-list"),
     ("docker stop web", "container-stop"),
     ("docker stop $(docker ps -q)", "container-stop"),
     ("docker kill web", "container-stop"),
@@ -649,7 +649,7 @@ def test_installing_named_packages_goes_to_the_model(library, text, rule_id):
     ("sudo -i whoami", "whoami-id"),
     ("sudo -iu deploy whoami", "whoami-id"),
     ("sudo -s -- ls", None),
-    ("sudo -l", None),
+    ("sudo -l", "sudo-list"),
 ])
 def test_sudo_opens_a_shell_only_without_a_command(library, text, rule_id):
     assert rule_of(library, text) == rule_id
