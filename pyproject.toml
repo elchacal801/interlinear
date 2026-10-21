@@ -1,0 +1,58 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "interlinear-cti"
+version = "0.1.0"
+description = "Line-by-line glosses of attacker shell histories, scripts and AI-agent transcripts, with every gloss labeled by its source."
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
+requires-python = ">=3.10"
+authors = [{ name = "Diego Parra" }]
+keywords = ["threat-intelligence", "incident-response", "mitre-attack", "shell-history", "ai-agents"]
+# No license classifier: PEP 639's license expression above replaces it, and hatchling rejects both together.
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Information Technology",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Security",
+]
+# The lowest versions that install and pass the suite on both Python 3.10 and 3.13: nothing older installs on 3.13.
+dependencies = ["pydantic>=2.8", "PyYAML>=6.0.1"]
+
+[project.optional-dependencies]
+# Countermap from PyPI, any 0.2 release: Interlinear uses its query and emit APIs, which 0.2.0 and 0.2.1 share.
+countermap = ["countermap>=0.2,<0.3"]
+# markdown-it-py with linkify-it-py: the local GitHub-flavored check of the Markdown view's inertness tests.
+dev = ["pytest>=8", "markdown-it-py[linkify]>=3.0"]
+
+[project.scripts]
+interlinear = "interlinear_cti.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/elchacal801/interlinear"
+Source = "https://github.com/elchacal801/interlinear"
+Issues = "https://github.com/elchacal801/interlinear/issues"
+Changelog = "https://github.com/elchacal801/interlinear/blob/main/CHANGELOG.md"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/interlinear_cti"]
+
+# An allowlist, so nothing else in a working tree (docs, raw inputs, .claude, scratch scenarios) can ship.
+# Build release files from `git -c core.autocrlf=false archive`, so only committed files with LF endings go in.
+[tool.hatch.build.targets.sdist]
+only-include = ["src", "tests", "plugin", "README.md", "LICENSE", "NOTICE", "CHANGELOG.md", "pyproject.toml"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["countermap: needs the countermap package and a built Countermap database"]

@@ -1,0 +1,191 @@
+# Defense evasion. Specific rules come before file-deletion, which matches any rm.
+#
+# ATT&CK 20.0 revoked T1562.001, T1070.001 and T1070.002; their replacements are T1685 (Disable or Modify Tools),
+# T1685.005 (Clear Windows Event Logs) and T1685.006 (Clear Linux or Mac System Logs).
+#
+# Placeholders such as {cmd}, {line}, {pre}, {word} and {end} are described in rules.py.
+
+- id: disable-history
+  match:
+    regex: '\bunset\s+HISTFILE\b|\bexport\s+HISTFILE=/dev/null\b|\bHIST(?:FILE)?SIZE=0\b|\bset\s+\+o\s+history\b|{cmd}ln(?:[^\S\n]+-{word}*){1,8}[^\S\n]+/dev/null[^\S\n]+["\x27]?[^\s|;&()<>"\x27`]*_history\b'
+  meaning: Stops the shell from recording commands.
+  techniques: [T1690]
+  artifacts: [Command History Log]
+  confidence: high
+  platforms: [linux, macos]
+  examples:
+    match:
+      - "unset HISTFILE"
+      - "export HISTFILE=/dev/null"
+      - "set +o history"
+      - "ln -sf /dev/null ~/.bash_history"
+      - "ln -fs /dev/null ~/.bash_history"
+    no_match:
+      - "echo $HISTFILE"
+      - "ln -s /tmp/a /tmp/b"
+
+# history -c, a redirection into a *_history file (the scan after > stops at a blank or another operator, so it stays
+# linear), the shell history files removed or emptied by name, and PowerShell's own history file,
+# (Get-PSReadlineOption).HistorySavePath.
+- id: clear-history
+  match:
+    regex: '(?i){line}history[^\S\n]+-c\b|{cmd}(?:(?:rm|shred|unlink|truncate|srm){end}(?:[^\S\n]+{word}+){0,16}?[^\S\n]+["\x27]?[^\s|;&()<>"\x27`]*\.(?:bash|zsh|sh)_history\b|(?:remove-item|rm|del|erase|clear-content){end}.*?\(get-psreadlineoption\)\.historysavepath)|>[^\S\n]*["\x27]?[^\s|;&()<>"\x27`]*_history\b|\bclear-history\b'
+  meaning: Erases the shell command history to hide what was run.
+  techniques: [T1070.003]
+  artifacts: [Command History Log]
+  confidence: high
+  examples:
+    match:
+      - "history -c"
+      - "rm -f ~/.bash_history"
+      - "cat /dev/null > ~/.bash_history"
+      - "Clear-History"
+      - "shred -u ~/.bash_history"
+      - "truncate -s0 /root/.zsh_history"
+      - "Remove-Item (Get-PSReadlineOption).HistorySavePath"
+    no_match:
+      - "history | tail"
+      - "cat ~/.bash_history"
+      - "cd ~\nhistory -c"  # anchored rules read the first line only
+
+- id: defender-tamper
+  match:
+    regex: '(?i){cmd}(?:set-mppreference(?=\s).*?\s-(?:disable|exclusion)|add-mppreference(?=\s).*?\s-exclusion)'
+  meaning: Turns off Microsoft Defender protections or excludes paths from scanning.
+  techniques: [T1685]
+  artifacts: [Application Configuration]
+  iocs: [path]
+  confidence: high
+  platforms: [windows]
+  examples:
+    match:
+      - "Set-MpPreference -DisableRealtimeMonitoring $true"
+      - 'Add-MpPreference -ExclusionPath C:\Users\Public'
+      - 'powershell -c "Set-MpPreference -DisableIOAVProtection $true"'
+    no_match:
+      - "Get-MpPreference"
+      - "Set-MpPreference -SignatureUpdateInterval 4"
+
+# The Linux audit system: auditd stopped, disabled or masked, or auditctl turning auditing off (-e 0) or deleting
+# every rule (-D).
+- id: audit-tamper
+  match:
+    regex: '{stage}(?:systemctl(?:[^\S\n]+-{word}*){0,8}[^\S\n]+(?:stop|disable|mask|kill){end}(?:[^\S\n]+{word}+){0,8}?[^\S\n]+auditd(?:\.service)?{end}|service[^\S\n]+auditd[^\S\n]+stop{end}|auditd[^\S\n]+stop{end}|auditctl(?:[^\S\n]+{word}+){0,8}?[^\S\n]+-(?:e[^\S\n]*0|D){end}|(?:pkill|killall)(?:[^\S\n]+-{word}*){0,8}[^\S\n]+auditd{end}|kill(?:[^\S\n]+-{word}*){0,8}[^\S\n]+\$\([^\S\n]*(?:pidof|pgrep)(?:[^\S\n]+-{word}*){0,8}[^\S\n]+auditd{end})'
+  meaning: Stops the Linux audit daemon or turns its rules off, so actions on the host are no longer recorded.
+  techniques: [T1685.004]
+  artifacts: [Service]
+  confidence: high
+  platforms: [linux]
+  examples:
+    match: ["systemctl stop auditd", "sudo systemctl disable --now auditd.service", "service auditd stop",
+            "auditctl -e 0", "auditctl -D"]
+    no_match: ["systemctl status auditd", "service auditd start", "auditctl -l", "systemctl restart auditd",
+               "pkill auditdx"]
+
+# Security tools and logging agents stopped, disabled or masked: AppArmor, EDR and antivirus agents, host IDS,
+# fail2ban and the syslog and journal daemons; setenforce 0 for SELinux. The firewall and auditd have their own
+# rules.
+- id: security-tool-stop
+  match:
+    regex: '{stage}(?:systemctl(?:[^\S\n]+-{word}*){0,8}[^\S\n]+(?:stop|disable|mask|kill){end}(?:[^\S\n]+{word}+){0,8}?[^\S\n]+(?:apparmor|falcon-sensor|falcond|cbagentd|cbdaemon|sentinelone|sentinelagent|ds_agent|mdatp|wdavdaemon|clamav-daemon|clamav-freshclam|clamd|freshclam|ossec|wazuh-agent|osqueryd|aide|fail2ban|elastic-agent|elastic-endpoint|auditbeat|filebeat|rsyslog|syslog|syslog-ng|systemd-journald|snort|suricata|tripwire|qualys-cloud-agent)(?:\.service)?{end}|(?:service[^\S\n]+)?(?:apparmor|clamav-daemon|clamd|ossec|wazuh-agent|osqueryd|fail2ban|rsyslog|syslog-ng|falcon-sensor)[^\S\n]+stop{end}|setenforce[^\S\n]+(?:0|[Pp]ermissive){end}|aa-teardown{end}|(?:pkill|killall)(?:[^\S\n]+-{word}*){0,8}[^\S\n]+(?:apparmor|falcon-sensor|falcond|cbagentd|cbdaemon|sentinelone|sentinelagent|ds_agent|mdatp|wdavdaemon|clamav-daemon|clamav-freshclam|clamd|freshclam|ossec|wazuh-agent|osqueryd|aide|fail2ban|elastic-agent|elastic-endpoint|auditbeat|filebeat|rsyslog|syslog|syslog-ng|systemd-journald|snort|suricata|tripwire|qualys-cloud-agent){end}|kill(?:[^\S\n]+-{word}*){0,8}[^\S\n]+\$\([^\S\n]*(?:pidof|pgrep)(?:[^\S\n]+-{word}*){0,8}[^\S\n]+(?:apparmor|falcon-sensor|falcond|cbagentd|cbdaemon|sentinelone|sentinelagent|ds_agent|mdatp|wdavdaemon|clamav-daemon|clamav-freshclam|clamd|freshclam|ossec|wazuh-agent|osqueryd|aide|fail2ban|elastic-agent|elastic-endpoint|auditbeat|filebeat|rsyslog|syslog|syslog-ng|systemd-journald|snort|suricata|tripwire|qualys-cloud-agent){end})'
+  meaning: Stops or disables a security tool or logging service, such as AppArmor, an EDR agent or rsyslog.
+  techniques: [T1685]
+  artifacts: [Service]
+  confidence: high
+  platforms: [linux]
+  examples:
+    match: ["systemctl disable --now apparmor", "systemctl stop falcon-sensor", "setenforce 0",
+            "kill -9 $(pidof falcon-sensor)", "pkill -f falcon-sensor",
+            "service rsyslog stop", "sudo systemctl mask --now systemd-journald"]
+    no_match: ["systemctl stop nginx", "systemctl status apparmor", "setenforce 1", "service rsyslog restart"]
+
+# Host firewalls opened or turned off: ufw disable, reset, allow and delete; iptables flushing, deleting or adding
+# an ACCEPT; nft flush, delete or an accept rule; firewall-cmd adding a port or service; and the firewall service
+# stopped. Listing rules, and rules that only block, are not this. Each scan stays inside the command ({seg}).
+- id: firewall-modify
+  match:
+    regex: '{stage}(?:ufw(?:[^\S\n]+--force)?[^\S\n]+(?:disable|reset|allow|delete|insert|route[^\S\n]+allow|default[^\S\n]+allow){end}|(?:iptables|ip6tables)(?:-legacy|-nft)?{end}(?={seg}*?[^\S\n](?:-F|--flush|-X|--delete-chain|-D|--delete|-P[^\S\n]+[A-Z]+[^\S\n]+ACCEPT|-j[^\S\n]+ACCEPT|--jump[^\S\n]+ACCEPT){end})|nft{end}(?={seg}*?[^\S\n](?:flush|delete|accept){end})|firewall-cmd{end}(?={seg}*?[^\S\n]--(?:add-port|add-service|add-rich-rule|add-source|remove-service|remove-port|set-default-zone|panic-off)(?:=|{end}))|systemctl(?:[^\S\n]+-{word}*){0,8}[^\S\n]+(?:stop|disable|mask|kill){end}(?:[^\S\n]+{word}+){0,8}?[^\S\n]+(?:ufw|firewalld|iptables|ip6tables|nftables|netfilter-persistent)(?:\.service)?{end}|service[^\S\n]+(?:ufw|firewalld|iptables|nftables)[^\S\n]+stop{end})'
+  meaning: Opens or turns off the host firewall, for example to allow a port or flush every rule.
+  techniques: [T1686]
+  artifacts: [Firewall]
+  confidence: medium
+  platforms: [linux]
+  examples:
+    match: ["ufw disable", "sudo ufw allow 4444/tcp", "iptables -F", "iptables -I INPUT -p tcp --dport 4444 -j ACCEPT",
+            "nft flush ruleset", "firewall-cmd --permanent --add-port=4444/tcp", "systemctl stop firewalld"]
+    no_match: ["ufw status", "iptables -L -n", "iptables -A INPUT -s 203.0.113[.]5 -j DROP", "nft list ruleset",
+               "ufw enable"]
+
+- id: event-log-clear
+  match:
+    regex: '(?i){cmd}(?:wevtutil(?:\.exe)?[^\S\n]+(?:cl|clear-log){end}|clear-eventlog{end})'
+  meaning: Clears a Windows event log, such as the Security log.
+  techniques: [T1685.005]
+  artifacts: [Event Log]
+  confidence: high
+  platforms: [windows]
+  examples:
+    match:
+      - "wevtutil cl Security"
+      - "wevtutil.exe clear-log System"
+      - "Clear-EventLog -LogName Security"
+    no_match:
+      - "wevtutil qe Security /c:5"
+      - "wevtutil el"
+
+# System logs: removed, shredded or truncated under /var/log, emptied by a bare redirection (> /var/log/wtmp,
+# echo > ..., cat /dev/null > ...), or deleted by a find whose target is /var/log or *.log files. An append (>>) adds
+# to a log and is not a wipe; a tool's own log elsewhere (rm -f .s2.log) is plain file deletion.
+- id: log-wipe
+  match:
+    regex: '{line}(?:{pre}(?:(?:rm|shred|unlink|truncate|srm|wipe){end}(?:[^\S\n]+{word}+){0,16}?[^\S\n]+["\x27]?(?:/var/log(?:/|(?![\w.-]))|/var/(?:run|adm)/(?:utmp|wtmp|btmp|lastlog))|cp[^\S\n]+/dev/null[^\S\n]+["\x27]?(?:/var/log/|/var/(?:run|adm)/(?:utmp|wtmp|btmp|lastlog))|find{end}(?=.*?(?:\s["\x27]?/var/log(?![\w.-])|-i?name\s+["\x27]?\*?\.log["\x27]?(?![\w.-])))(?:.*\s-delete\b|.*\s-(?:execdir|exec)\s+["\x27]?(?:[^\s|;&()<>"\x27`]*/)?(?:rm|shred|truncate){end}|.*\|\s*xargs\b[^|\n]*\b(?:rm|shred|truncate)\b)|journalctl{end}.*--vacuum-(?:time|size|files))|(?:(?::|true|echo(?:[^\S\n]+-[neE]+)?(?:[^\S\n]+(?:""|\x27\x27))?|printf[^\S\n]+(?:""|\x27\x27)|cat[^\S\n]+/dev/null)[^\S\n]*)?>[^\S\n]*["\x27]?(?:/var/log/|/var/(?:run|adm)/(?:utmp|wtmp|btmp|lastlog)))'
+  meaning: Deletes or empties system logs, such as /var/log/auth.log or wtmp, to hide activity.
+  techniques: [T1685.006]
+  artifacts: [Event Log]
+  iocs: [path]
+  confidence: high
+  platforms: [linux, macos]
+  examples:
+    match:
+      - "rm -rf /var/log/*"
+      - "rm -f /var/log/auth.log"
+      - "> /var/log/wtmp"
+      - "echo > /var/log/syslog"
+      - "cat /dev/null > /var/log/auth.log"
+      - "truncate -s 0 /var/log/secure"
+      - 'find /var/log -type f -exec truncate -s0 {} \;'
+      - "find / -name '*.log' -delete"
+      - "shred -u /var/log/btmp"
+      - "journalctl --vacuum-time=1s"
+    no_match:
+      - "cd /tmp\n> /var/log/wtmp"  # anchored rules read the first line only
+      - "cat /var/log/auth.log"
+      - "rm -f .s2.log"
+      - "echo hello >> /var/log/app.log"
+      - "tail -f /var/log/syslog"
+      - "find /var/log -name '*.gz'"
+
+- id: file-deletion
+  match:
+    regex: '(?i){cmd}(?:(?:shred|wipe|srm)(?:\.exe)?{end}|(?:rm|unlink|del|erase|remove-item|ri)(?:\.exe)?{end}(?:[^\S\n]+(?:-{word}*|/[a-z]{end}|(?!["\x27]?(?:(?:/tmp|/var/tmp|/dev/shm)(?![\w.-])|\$\{?TMPDIR\b|\$\{?0\}?(?!\w)|\$\{?BASH_SOURCE|[a-z]:\\windows\\temp|%temp%|\$env:temp|[^\s|;&()<>{}`]*?(?:(?<![^\s/\\"\x27~])\.(?![./\\\s])|\\users\\public\\|\\appdata\\local\\temp|xmrig|xmr-stak|kinsing|kdevtmpfsi|minerd|cpuminer|\.(?:sh|elf|bin|so|exe|dll|ps1|bat|vbs|hta)(?=["\x27]?(?:[\s|;&)]|$)))))["\x27]?[^\s|;&()<>{}`-][^\s|;&()<>{}`]*)){0,16}?[^\S\n]+(?=["\x27]?(?:(?:/tmp|/var/tmp|/dev/shm)(?![\w.-])|\$\{?TMPDIR\b|\$\{?0\}?(?!\w)|\$\{?BASH_SOURCE|[a-z]:\\windows\\temp|%temp%|\$env:temp|[^\s|;&()<>{}`]*?(?:(?<![^\s/\\"\x27~])\.(?![./\\\s])|\\users\\public\\|\\appdata\\local\\temp|xmrig|xmr-stak|kinsing|kdevtmpfsi|minerd|cpuminer|\.(?:sh|elf|bin|so|exe|dll|ps1|bat|vbs|hta)(?=["\x27]?(?:[\s|;&)]|$)))))|find{end}[^\S\n]+["\x27]?(?:(?:/tmp|/var/tmp|/dev/shm)(?![\w.-])|[^\s|;&()<>{}`]*?/\.(?![./]))[^\n]*?(?:\s-delete\b|\s-(?:execdir|exec)\s+["\x27]?(?:[^\s|;&()<>"\x27`]*/)?(?:rm|shred){end}|\|\s*xargs\b[^|\n]*\b(?:rm|shred)\b))'
+  meaning: Deletes files that look like intrusion traces (temporary or hidden paths, the running script, dropped tools), or shreds files.
+  techniques: [T1070.004]
+  artifacts: [File]
+  iocs: [path]
+  confidence: medium
+  examples:
+    match:
+      - "rm -rf /tmp/.x"
+      - "shred -u payload"
+      - "sudo rm -f /tmp/a"
+      - "find /tmp/.x -type f -delete"
+      - 'del /f /q C:\Users\Public\x.exe'
+      - 'Remove-Item -Force C:\Windows\Temp\a.ps1'
+      - 'rm -f "$0"'
+      - "rm -f ./xmrig x.sh"
+    no_match:
+      - "rmdir x"
+      - "find /tmp -name x"
+      - "rm -rf build dist"
+      - "rm -f notes.txt"
+      - "rm -r ./docs/old"

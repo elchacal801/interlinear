@@ -1,0 +1,164 @@
+# Network tools. Every rule is anchored at the command position ({cmd}, described in rules.py), so a line that only
+# names a tool (ls /opt/chisel, cat frpc.ini, chown john:john) is not a match.
+#
+# ssh's words are read as ssh reads them: options, the destination, more options, then the remote command, which
+# starts at the first plain word after the destination (ssh host chown -R ... runs chown, so its -R is not ssh's).
+# An option word holds flags that take no argument (46AaCfGgKkMNnqsTtVvXxYy), then at most one letter that does
+# (BbcDEeFIiJLlmOoPpQRSWw) with its argument glued or as the next word. A forwarding flag (D, L or R) may be clustered
+# and glued (-fNR, -NfL, -R2222:...); -oLogLevel=... is the o option with its argument, not -L.
+
+- id: tunnel
+  match:
+    regex: '{cmd}(?:(?:auto)?ssh(?:\.exe)?{end}(?:[^\S\n]+-[46AaCfGgKkMNnqsTtVvXxYy]*(?:[BbcDEeFIiJLlmOoPpQRSWw](?:{word}+|[^\S\n]+[^\s|;&()<>{}`-]{word}*)|{end})){0,16}?(?:[^\S\n]+[^\s|;&()<>{}`-]{word}*(?:[^\S\n]+-[46AaCfGgKkMNnqsTtVvXxYy]*(?:[BbcDEeFIiJLlmOoPpQRSWw](?:{word}+|[^\S\n]+[^\s|;&()<>{}`-]{word}*)|{end})){0,16}?)?[^\S\n]+-[46AaCfGgKkMNnqsTtVvXxYy]*[LR]|(?:chisel|ngrok|frpc|frps)(?:\.exe)?{end})'
+  meaning: Forwards ports through an SSH tunnel or a tunneling tool, to reach hosts or services from outside.
+  techniques: [T1572, T1090]
+  artifacts: [Network Traffic]
+  iocs: [ipv4, domain, port]
+  confidence: high
+  examples:
+    match:
+      - "ssh -L 8080:10.0.0[.]5:80 -N user@203.0.113[.]5"
+      - "ssh -fNR 2222:localhost:22 user@203.0.113[.]5"
+      - "ssh -R2222:localhost:22 root@203.0.113[.]5"
+      - "./chisel client 203.0.113[.]5:8000 R:socks"
+      - "ngrok tcp 22"
+      - "./frpc -c frpc.ini"
+      - "sshpass -p x ssh -NR 9000:localhost:22 u@203.0.113[.]5"
+      - "autossh -M 0 -f -N -R 2222:localhost:22 u@203.0.113[.]5"
+    no_match:
+      - "ssh root@10.0.0[.]5"
+      - "ssh -D 1080 -N user@10.0.0[.]5"
+      - "ls /opt/chisel"
+      - "cat frpc.ini"
+      - "ssh -oLogLevel=ERROR root@10.0.0[.]5"
+      - "ssh u@10.0.0[.]5 'chown -R www-data /var/www'"
+      - "ssh root@10.0.0[.]5 chown -R www-data /var/www"
+
+- id: proxy
+  match:
+    regex: '{cmd}(?:(?:auto)?ssh(?:\.exe)?{end}(?:[^\S\n]+-[46AaCfGgKkMNnqsTtVvXxYy]*(?:[BbcDEeFIiJLlmOoPpQRSWw](?:{word}+|[^\S\n]+[^\s|;&()<>{}`-]{word}*)|{end})){0,16}?(?:[^\S\n]+[^\s|;&()<>{}`-]{word}*(?:[^\S\n]+-[46AaCfGgKkMNnqsTtVvXxYy]*(?:[BbcDEeFIiJLlmOoPpQRSWw](?:{word}+|[^\S\n]+[^\s|;&()<>{}`-]{word}*)|{end})){0,16}?)?[^\S\n]+-[46AaCfGgKkMNnqsTtVvXxYy]*D|(?:socat|gost)(?:\.exe)?{end})'
+  meaning: Sets up a SOCKS proxy or a relay that passes traffic through this host.
+  techniques: [T1090]
+  artifacts: [Network Traffic]
+  iocs: [ipv4, domain, port]
+  confidence: high
+  examples:
+    match:
+      - "ssh -D 1080 -N user@10.0.0[.]5"
+      - "ssh -fND 1080 u@203.0.113[.]5"
+      - "socat TCP-LISTEN:4444,fork TCP:10.0.0[.]5:22"
+      - "./gost -L=:8080"
+    no_match:
+      - "ssh root@10.0.0[.]5"
+      - "cat /etc/gost.yaml"
+
+- id: ssh-remote
+  match:
+    regex: '{cmd}(?:ssh|scp|sshpass)(?:\.exe)?(?=\s)'
+  meaning: Connects to or copies files to another host over SSH.
+  techniques: [T1021.004]
+  artifacts: [Network Traffic]
+  iocs: [ipv4, domain, port]
+  confidence: medium
+  examples:
+    match:
+      - "ssh root@10.0.0[.]5"
+      - "scp /tmp/x root@10.0.0[.]5:/tmp/"
+      - "sshpass -p pass ssh user@host"
+      - "ssh root@evil.example[.]com"
+    no_match:
+      - "ssh-keygen -t ed25519"
+      - "echo ssh"
+
+# nmap -sn (-sP in older releases) only finds which hosts are up, with no port scan: remote system discovery. Its
+# option is one of the command's own words, before any comment.
+- id: host-discovery-scan
+  match:
+    regex: '{cmd}nmap(?:\.exe)?{end}(?:[^\S\n]+(?!#){word}+){0,32}?[^\S\n]+-s[nP]{end}'
+  meaning: Sweeps a network for hosts that are up, without scanning their ports.
+  techniques: [T1018]
+  artifacts: [Network Traffic]
+  iocs: [ipv4, domain]
+  confidence: high
+  examples:
+    match:
+      - "nmap -sn 10.0.0[.]0/24"
+      - "sudo nmap -n -sn -PE 203.0.113[.]0/24 -oG -"
+      - "nmap -sP 192.0.2[.]0/24"
+    no_match:
+      - "nmap -sV 10.0.0[.]0/24"
+      - "nmap -snapshot 10.0.0[.]5"
+      - "nmap -p- 10.0.0[.]5 # not -sn"
+      - "nmap 10.0.0[.]5; echo -sn"
+
+- id: network-scan
+  match:
+    regex: '{cmd}(?:nmap|masscan|zmap|rustscan|naabu)(?:\.exe)?{end}'
+  meaning: Scans hosts and ports to find network services.
+  techniques: [T1046]
+  artifacts: [Network Traffic]
+  iocs: [ipv4, domain, port]
+  confidence: high
+  examples:
+    match:
+      - "nmap -sV 10.0.0[.]0/24"
+      - "masscan -p1-65535 203.0.113[.]0/24 --rate 10000"
+      - "sudo nmap -sS -p 22,80 203.0.113[.]0/24"
+    no_match:
+      - "nmapper"
+      - "cat nmap.txt"
+
+# hydra -C and medusa -C read a file of login:password pairs (medusa's also holds the host): credential stuffing.
+- id: credential-stuffing
+  match:
+    regex: '{cmd}(?:hydra|medusa)(?:\.exe)?{end}(?:[^\S\n]+(?!#){word}+){0,32}?[^\S\n]+-C{end}'
+  meaning: Tries login and password pairs from a list against a network service.
+  techniques: [T1110.004]
+  artifacts: [Password]
+  iocs: [ipv4, url, domain]
+  confidence: high
+  examples:
+    match:
+      - "hydra -C creds.txt ssh://10.0.0[.]5"
+      - "hydra -t 4 -C /tmp/combo.txt 10.0.0[.]5 ftp"
+      - "medusa -h 10.0.0[.]5 -C combo.txt -M ssh"
+    no_match:
+      - "hydra -l root -P pass.txt ssh://10.0.0[.]5"
+      - "hydra -c 5 -l root -P p.txt 10.0.0[.]5 ssh"
+      - "hydra -l root -P p.txt 10.0.0[.]5 ssh; echo -C"
+
+- id: brute-force
+  match:
+    regex: '{cmd}(?:hydra|medusa|ncrack|crowbar|patator)(?:\.exe)?{end}'
+  meaning: Guesses passwords against a network service.
+  techniques: [T1110.001]
+  artifacts: [Password]
+  iocs: [ipv4, url, domain]
+  confidence: high
+  examples:
+    match:
+      - "hydra -l root -P pass.txt ssh://10.0.0[.]5"
+      - "medusa -h 10.0.0[.]5 -u root -P p.txt -M ssh"
+      - "ncrack -p 22 10.0.0[.]5"
+    no_match:
+      - "chown john:john x"
+      - "man hydra"
+
+- id: password-cracking
+  match:
+    regex: '{cmd}(?:hashcat|john)(?:\.exe|\.bin)?{end}'
+  meaning: Cracks password hashes offline.
+  techniques: [T1110.002]
+  artifacts: [Password]
+  iocs: [path]
+  confidence: high
+  examples:
+    match:
+      - "hashcat -m 1800 hashes.txt rockyou.txt"
+      - "john --wordlist=rockyou.txt hashes.txt"
+      - "./john h.txt"
+    no_match:
+      - "johnson"
+      - "chown john:john x"
+      - "sudo -u john bash"
+      - "su john"

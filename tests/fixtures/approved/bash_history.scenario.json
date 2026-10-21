@@ -1,0 +1,62 @@
+{
+  "title": "bash_history",
+  "description": "Exported by Interlinear 0.1.0 from bash_history. The steps follow the transcript's line order; each cites its transcript lines and gloss sources.",
+  "authors": [],
+  "steps": [
+    {
+      "id": "s1",
+      "technique": "T1033",
+      "description": "Line 1 (rule; operator): Checks which user the session is running as."
+    },
+    {
+      "id": "s2",
+      "technique": "T1105",
+      "after": [
+        "s1"
+      ],
+      "description": "Line 3 (rule; operator): Downloads a file from a remote host to disk."
+    },
+    {
+      "id": "s3",
+      "technique": "T1222.002",
+      "after": [
+        "s2"
+      ],
+      "description": "Line 5 (rule; operator): Makes a file executable, typically a payload that was just downloaded."
+    },
+    {
+      "id": "s4",
+      "technique": "T1087.001",
+      "after": [
+        "s3"
+      ],
+      "description": "Line 7 (rule; operator): Lists local user accounts."
+    },
+    {
+      "id": "s5",
+      "technique": "T1098.004",
+      "after": [
+        "s4"
+      ],
+      "description": "Line 8 (rule; operator): Adds an SSH key so the attacker can log in again later."
+    },
+    {
+      "id": "s6",
+      "technique": "T1690",
+      "after": [
+        "s5"
+      ],
+      "description": "Line 10 (rule; operator): Stops the shell from recording commands."
+    },
+    {
+      "id": "s7",
+      "technique": "T1070.003",
+      "after": [
+        "s6"
+      ],
+      "description": "Line 11 (rule; operator): Erases the shell command history to hide what was run."
+    }
+  ],
+  "countermeasures": "auto",
+  "max_countermeasures_per_step": 2
+}

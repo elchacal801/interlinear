@@ -1,0 +1,30 @@
+{
+  "title": "zsh_history",
+  "description": "Exported by Interlinear 0.1.0 from zsh_history. The steps follow the transcript's line order; each cites its transcript lines and gloss sources.",
+  "authors": [],
+  "steps": [
+    {
+      "id": "s1",
+      "technique": "T1082",
+      "description": "Line 1 (rule; operator): Collects operating system and hardware details."
+    },
+    {
+      "id": "s2",
+      "technique": "T1057",
+      "after": [
+        "s1"
+      ],
+      "description": "Line 2 (rule; operator): Lists running processes, for example to spot security tools or competing malware."
+    },
+    {
+      "id": "s3",
+      "technique": "T1105",
+      "after": [
+        "s2"
+      ],
+      "description": "Line 3 (rule; operator): Downloads a script and pipes it straight into a shell, so it runs without being saved."
+    }
+  ],
+  "countermeasures": "auto",
+  "max_countermeasures_per_step": 2
+}

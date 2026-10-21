@@ -1,0 +1,30 @@
+{
+  "title": "inventory.ps1",
+  "description": "Exported by Interlinear 0.1.0 from inventory.ps1. The steps follow the transcript's line order; each cites its transcript lines and gloss sources.",
+  "authors": [],
+  "steps": [
+    {
+      "id": "s1",
+      "technique": "T1057",
+      "description": "Line 2 (rule; operator): Lists running processes, for example to spot security tools or competing malware."
+    },
+    {
+      "id": "s2",
+      "technique": "T1016",
+      "after": [
+        "s1"
+      ],
+      "description": "Line 3 (rule; operator): Reads the host's network configuration (interfaces, addresses, routes, DNS)."
+    },
+    {
+      "id": "s3",
+      "technique": "T1082",
+      "after": [
+        "s2"
+      ],
+      "description": "Line 4 (rule; operator): Collects operating system and hardware details."
+    }
+  ],
+  "countermeasures": "auto",
+  "max_countermeasures_per_step": 2
+}

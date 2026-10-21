@@ -1,0 +1,242 @@
+# Discovery. Every rule is anchored at the command position ({cmd}, described in rules.py), and Windows commands
+# match in any case.
+
+- id: whoami-id
+  match:
+    regex: '(?i){cmd}(?:whoami|id)(?:\.exe)?{end}'
+  meaning: Checks which user the session is running as.
+  techniques: [T1033]
+  artifacts: [User Account]
+  confidence: high
+  examples:
+    match: ["whoami", "id", "whoami /all", "WhoAmI", "sudo -i whoami", "sudo -H whoami"]
+    no_match: ["idle", "id_rsa=1", "pwd\nwhoami", "env -S /tmp/.x/a whoami", "env -iS x id"]  # anchored rules read the first line only
+
+- id: system-info
+  match:
+    regex: '(?i){cmd}(?:(?:uname|hostnamectl|lscpu|systeminfo|nproc)(?:\.exe)?{end}|cat(?:[^\S\n]+-{word}*){0,8}[^\S\n]+/etc/(?:os-release|issue|lsb-release)\b)'
+  meaning: Collects operating system and hardware details.
+  techniques: [T1082]
+  artifacts: [Operating System]
+  confidence: high
+  examples:
+    match: ["uname -a", "cat /etc/os-release", "lscpu", "nproc", "SystemInfo", "command -p uname -a"]
+    no_match: ["cat /etc/passwd", "unamex"]
+
+- id: process-list
+  match:
+    regex: '(?i){cmd}(?:ps|top|htop|pgrep|tasklist|get-process|gps)(?:\.exe)?{end}'
+  meaning: Lists running processes, for example to spot security tools or competing malware.
+  techniques: [T1057]
+  artifacts: [Process]
+  confidence: high
+  examples:
+    match: ["ps aux", "top", "Get-Process", "tasklist /v"]
+    no_match: ["pstree", "topgrade"]
+
+# Installed or available software listed: apt list, search, show and policy (and apt-cache), dpkg -l and -s,
+# dpkg-query, rpm -q, and yum or dnf list, info and search. Updating and upgrading packages is context
+# (package-install); installing named packages is left to the model.
+- id: software-discovery
+  match:
+    regex: '{stage}(?:(?:apt|apt-get|apt-cache)(?:[^\S\n]+-{word}*){0,8}[^\S\n]+(?:list|search|show|showpkg|policy|madison){end}|dpkg(?:[^\S\n]+-{word}*){0,8}?[^\S\n]+(?:-[A-Za-z]*[lsLp][A-Za-z]*|--list|--status|--listfiles|--print-avail){end}|dpkg-query{end}|rpm(?:[^\S\n]+-{word}*){0,8}?[^\S\n]+-q[A-Za-z]*{end}|(?:yum|dnf)(?:[^\S\n]+-{word}*){0,8}[^\S\n]+(?:list|info|search){end})'
+  meaning: Lists installed or available software and versions, for example to find vulnerable or security software.
+  techniques: [T1518]
+  artifacts: [Software]
+  confidence: medium
+  platforms: [linux]
+  examples:
+    match: ["apt list --installed", "apt-cache policy nginx", "dpkg -l | grep ssh", "dpkg -s openssh-server",
+            "rpm -qa", "rpm -qi openssh"]
+    no_match: ["dpkg -i x.deb", "rpm -ivh x.rpm", "apt install x", "apt-get update"]
+
+# Containers and cluster resources listed or inspected: docker ps, images, inspect, stats and top, the ls and
+# inspect subcommands (container, image, network, volume and the swarm objects), compose ps and images, and kubectl
+# get, describe and top. Global options that take an argument (-H host, --context x, kubectl -n ns) are skipped with
+# it. A container's logs are context (container-status).
+- id: container-discovery
+  match:
+    regex: '{stage}(?:docker(?:[^\S\n]+(?:-[Hc]|--host|--context|--config|--log-level)[^\S\n]+[^\s|;&()<>{}`-]{word}*|[^\S\n]+-{word}*){0,8}[^\S\n]+(?:ps|images|inspect|stats|top|(?:container|image|network|volume|node|service|secret|config|context|plugin)[^\S\n]+(?:ls|list|inspect)|compose(?:[^\S\n]+(?:-[fp]|--file|--project-name)[^\S\n]+[^\s|;&()<>{}`-]{word}*|[^\S\n]+-{word}*){0,8}[^\S\n]+(?:ps|images|top))|docker-compose(?:[^\S\n]+(?:-[fp]|--file|--project-name)[^\S\n]+[^\s|;&()<>{}`-]{word}*|[^\S\n]+-{word}*){0,8}[^\S\n]+(?:ps|images|top)|kubectl(?:[^\S\n]+(?:-n|--namespace|--context|--kubeconfig|--cluster)[^\S\n]+[^\s|;&()<>{}`-]{word}*|[^\S\n]+-{word}*){0,8}[^\S\n]+(?:get|describe|top)){end}'
+  meaning: Lists or inspects containers, images, networks or cluster resources, to see what runs in the environment.
+  techniques: [T1613]
+  artifacts: [Container]
+  confidence: high
+  examples:
+    match: ["docker ps", "sudo docker ps -a", "docker images", "docker inspect web", "docker network ls",
+            "kubectl get pods -A", "kubectl -n prod describe pod web-1", "cd /opt/app && docker compose ps"]
+    no_match: ["docker logs web", "docker run -d nginx", "kubectl apply -f x.yaml", "kubectl exec -it web-1 -- sh",
+               "echo docker ps", "docker psx"]
+
+- id: network-connections
+  match:
+    regex: '(?i){cmd}(?:netstat(?:\.exe)?{end}|ss[^\S\n]+-\w*[tuan]|lsof[^\S\n]+-i)'
+  meaning: Lists network connections and listening ports.
+  techniques: [T1049]
+  artifacts: [Network Connection]
+  confidence: high
+  examples:
+    match: ["netstat -antp", "ss -tulpn", "lsof -i :22", "NETSTAT -ano"]
+    no_match: ["ssh root@x", "lsof /tmp/x"]
+
+# Reading the configuration only: ip route add, del or change (and the other ip writes) change it instead.
+- id: network-config
+  match:
+    regex: '(?i){cmd}(?:ifconfig(?:\.exe)?{end}|ipconfig(?:\.exe)?{end}|ip(?:[^\S\n]+-{word}+){0,8}[^\S\n]+(?:a|addr|address|r|route|link|n|neigh|neighbor|neighbour){end}(?![^\S\n]+(?:add|del|delete|change|replace|append|prepend|flush|set|save|restore){end})|cat[^\S\n]+/etc/resolv\.conf\b|route(?:\.exe)?[^\S\n]+(?:-n|print)\b)'
+  meaning: Reads the host's network configuration (interfaces, addresses, routes, DNS).
+  techniques: [T1016]
+  artifacts: [Network Configuration]
+  confidence: high
+  examples:
+    match: ["ifconfig", "ip a", "ip route", "cat /etc/resolv.conf", "IPCONFIG /all", "ip -4 addr show", "route -n"]
+    no_match: ["ipython", "ip route add default via 10.0.0[.]1", "ip link set eth0 up", "route add default gw 10.0.0[.]1"]
+
+# /etc/passwd read before any redirection or pipe, so a write into it (>> or tee) is never a match. Quoted text,
+# such as an awk program with a > in it, is skipped whole.
+- id: account-list
+  match:
+    regex: '{cmd}(?:(?:cat|less|more|head|tail|awk|cut|grep|sort){end}(?:\x27[^\x27\n]*\x27|"[^"\n]*"|[^>|\x27"\n])*?\s/etc/passwd\b|(?:getent[^\S\n]+passwd|lastlog){end})'
+  meaning: Lists local user accounts.
+  techniques: [T1087.001]
+  artifacts: [User Account]
+  confidence: high
+  platforms: [linux]
+  examples:
+    match:
+      - "cat /etc/passwd"
+      - "getent passwd"
+      - "grep bash /etc/passwd"
+      - "cat /etc/passwd 2>/dev/null"
+      - "cat /etc/passwd | grep -v nologin > /tmp/users"
+      - "awk -F: '$3 > 999' /etc/passwd"
+    no_match:
+      - "echo 'x:x:0:0::/root:/bin/bash' >> /etc/passwd"
+      - "cat x >> /etc/passwd"
+      - "cat x | tee -a /etc/passwd"
+
+# net user lists accounts, or shows one; with a password or /add, /delete or /active it changes one instead.
+- id: net-user-domain
+  match:
+    regex: '(?i){cmd}net1?(?:\.exe)?[^\S\n]+user(?:[^\S\n]+[^\s/|;&()<>{}`]{word}*)?[^\S\n]+/domain{end}[^\S\n]*(?:$|[\n|>]|[0-9]>)'
+  meaning: Lists domain user accounts, or shows one, with net user /domain.
+  techniques: [T1087.002]
+  artifacts: [Domain User Account]
+  iocs: [user]
+  confidence: high
+  platforms: [windows]
+  examples:
+    match: ["net user /domain", "net user john /domain", "NET USER /DOMAIN"]
+    no_match: ["net user john P@ss /add /domain", "net user john"]
+
+- id: net-user
+  match:
+    regex: '(?i){cmd}net1?(?:\.exe)?[^\S\n]+user(?:[^\S\n]+[^\s/|;&()<>{}`]{word}*)?[^\S\n]*(?:$|[\n|>]|[0-9]>)'
+  meaning: Lists local user accounts, or shows one, with net user.
+  techniques: [T1087.001]
+  artifacts: [User Account]
+  iocs: [user]
+  confidence: high
+  platforms: [windows]
+  examples:
+    match: ["net user", "net user administrator", "net user > u.txt"]
+    no_match: ["net user backdoor P@ss /add", "net user john /delete", "net use"]
+
+# ATT&CK's text for Permission Groups Discovery names net group and net localgroup, so that technique comes first.
+- id: net-group
+  match:
+    regex: '(?i){cmd}net1?(?:\.exe)?[^\S\n]+group{end}(?!.*\s/(?:add|del|delete){end})'
+  meaning: Lists domain groups or a domain group's members, such as Domain Admins.
+  techniques: [T1069.002, T1087.002]
+  artifacts: [User Group]
+  confidence: high
+  platforms: [windows]
+  examples:
+    match: ['net group "Domain Admins" /domain', "net group /domain"]
+    no_match: ["net group x y /add /domain", "net groups"]
+
+- id: net-localgroup
+  match:
+    regex: '(?i){cmd}net1?(?:\.exe)?[^\S\n]+localgroup{end}(?!.*\s/(?:add|del|delete){end})'
+  meaning: Lists local groups or a local group's members, such as the administrators.
+  techniques: [T1069.001, T1087.001]
+  artifacts: [User Group]
+  confidence: high
+  platforms: [windows]
+  examples:
+    match: ["net localgroup administrators", "net localgroup"]
+    no_match: ["net localgroup administrators backdoor /add"]
+
+- id: domain-trusts
+  match:
+    regex: '(?i){cmd}nltest(?:\.exe)?(?=\s).*?/(?:domain_trusts|trusted_domains|all_trusts)\b'
+  meaning: Lists the domain's trust relationships, which show where else credentials may work.
+  techniques: [T1482]
+  artifacts: [Domain Trust Policy]
+  iocs: [domain]
+  confidence: high
+  platforms: [windows]
+  examples:
+    match: ["nltest /domain_trusts", "nltest /domain_trusts /all_trusts", "nltest.exe /trusted_domains"]
+    no_match: ["nltest /dclist:corp.example[.]com", "nltest /parentdomain"]
+
+- id: domain-controllers
+  match:
+    regex: '(?i){cmd}nltest(?:\.exe)?(?=\s).*?/(?:dclist|dsgetdc)\b'
+  meaning: Lists or locates the domain controllers.
+  techniques: [T1018]
+  artifacts: [Computer Network Node]
+  iocs: [domain]
+  confidence: high
+  platforms: [windows]
+  examples:
+    match: ["nltest /dclist:corp.example[.]com", "nltest /dsgetdc:corp.example[.]com"]
+    no_match: ["nltest /domain_trusts"]
+
+# A find that deletes (-delete, -exec rm, -exec truncate or -exec shred, or | xargs rm) is cleanup, not discovery.
+# A recursive dir (dir /s, often with a file pattern such as *.kdbx) is the Windows file search.
+- id: file-discovery
+  match:
+    regex: '{cmd}(?:find{end}(?!.*\s-delete\b|.*\s-(?:execdir|exec)\s+["\x27]?(?:[^\s|;&()<>"\x27`]*/)?(?:rm|shred|truncate){end}|.*\|\s*xargs\b[^|\n]*\b(?:rm|shred|truncate)\b)[^\S\n]+/\S*[^\S\n]+(?=\S).*-(?:name|perm|user|type)\b|(?i:dir)(?:\.exe)?{end}(?=[^\n]*[^\S\n]/(?i:s){end}))'
+  meaning: Searches the file system, for example for SUID binaries, configuration files or password databases.
+  techniques: [T1083]
+  artifacts: [File]
+  confidence: medium
+  platforms: [linux, macos, windows]
+  examples:
+    match: ["find / -perm -4000 -type f 2>/dev/null", "find /etc -name '*.conf'", 'dir /s /b C:\Users\*.kdbx']
+    no_match:
+      - "find . -name '*.py'"
+      - "find /var/log -name '*.log' -delete"
+      - 'find /tmp -type f -exec rm -f {} \;'
+      - "ls /usr/bin/find"
+      - "dir C:\\Users"
+
+# Reading logs: journalctl (but not --vacuum, --rotate or --flush, which change them), dmesg (but not -c, which clears
+# it), and a reader on a file under /var/log. A redirection into /var/log before the path is a write, left to
+# log-wipe, so the scan stops at a >.
+- id: log-enumeration
+  match:
+    regex: '{cmd}(?:journalctl{end}(?!{seg}*?[^\S\n]--(?:vacuum|rotate|flush|relinquish))|dmesg{end}(?!{seg}*?[^\S\n](?:-[A-Za-z]*[cC]|--clear|--read-clear){end})|(?:cat|less|more|head|tail|grep|egrep|fgrep|zgrep|zcat|zless|zmore|awk|cut|sort|uniq|wc|strings|tac)(?:\.exe)?{end}[^\n|;&>]*?[^\S\n]["\x27]?/var/log/)'
+  meaning: Reads system or service logs, for example logins in auth.log or a service's journal.
+  techniques: [T1654]
+  artifacts: [Log]
+  iocs: [path]
+  confidence: medium
+  platforms: [linux]
+  examples:
+    match: ["journalctl -u ssh --since today", "journalctl -xe", "tail -f /var/log/auth.log",
+            "grep -i fail /var/log/auth.log", "zcat /var/log/auth.log.2.gz", "dmesg | tail"]
+    no_match: ["journalctl --vacuum-time=1s", "cat /dev/null > /var/log/auth.log", "dmesg -C", "cat /etc/hosts"]
+
+- id: browser-history
+  match:
+    regex: '{cmd}(?:sqlite3|cp|scp|rsync|cat|strings|tar|zip|7z|curl)(?:\.exe)?{end}{seg}*?[^\S\n]["\x27]?(?=[^\s|;&()<>]*?(?i:chrom|brave|edge|opera|vivaldi|firefox|mozilla|librewolf|safari))[^\s|;&()<>]*?(?:/History|places\.sqlite)(?![\w.-])'
+  meaning: Reads or copies a web browser's history, which shows the sites and internal services a user visits.
+  techniques: [T1217]
+  artifacts: [File]
+  iocs: [path]
+  confidence: high
+  examples:
+    match:
+      - "sqlite3 ~/.mozilla/firefox/x.default/places.sqlite 'select url from moz_places'"
+      - "cp ~/.config/google-chrome/Default/History /tmp/h"
+    no_match: ["sqlite3 app.db 'select * from history'", "history", "cat ~/.bash_history", "cp /srv/app/History /tmp/"]

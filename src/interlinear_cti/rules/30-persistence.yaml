@@ -1,0 +1,96 @@
+# Persistence that is not a write to a file the earlier rules watch: new accounts and Windows autostarts. The cron
+# and authorized_keys rules moved to 05-persistence.yaml, ahead of transfer.
+#
+# Placeholders such as {cmd}, {stage}, {word} and {end} are described in rules.py.
+
+- id: account-create
+  match:
+    regex: '(?i){cmd}(?:(?:useradd|adduser)(?:\.exe)?{end}|net1?(?:\.exe)?[^\S\n]+user[^\S\n](?:.*[^\S\n])?/add{end})|>>[^\S\n]*["\x27]?/etc/passwd\b|{stage}tee(?:[^\S\n]+-{word}*){0,8}[^\S\n]+["\x27]?/etc/passwd\b'
+  meaning: Creates a new local account, often a backdoor login.
+  techniques: [T1136.001]
+  artifacts: [User Account]
+  iocs: [user]
+  confidence: high
+  multiline: true  # a heredoc appended to /etc/passwd is the accounts it adds
+  examples:
+    match:
+      - "useradd -m -s /bin/bash sysadm"
+      - "echo 'x:x:0:0::/root:/bin/bash' >> /etc/passwd"
+      - "net user backdoor P@ss /add"
+      - "sudo adduser --disabled-password helper"
+      - "echo 'x:x:0:0::/root:/bin/sh' | tee -a /etc/passwd"
+    no_match:
+      - "userdel olduser"
+      - "net user john"
+
+- id: scheduled-task
+  match:
+    regex: '(?i){cmd}(?:schtasks(?:\.exe)?(?=\s).*?[-/]create\b|register-scheduledtask\b)'
+  meaning: Creates a Windows scheduled task so a program runs on a schedule or at logon.
+  techniques: [T1053.005]
+  artifacts: [Scheduled Job]
+  iocs: [path]
+  confidence: high
+  platforms: [windows]
+  examples:
+    match:
+      - 'schtasks /create /sc minute /mo 5 /tn upd /tr C:\Users\Public\u.exe'
+      - 'SCHTASKS /Create /SC ONLOGON /TN x /TR C:\x.exe'
+      - "Register-ScheduledTask -TaskName upd -Action $a -Trigger $t"
+    no_match:
+      - "schtasks /query /fo list"
+      - "Get-ScheduledTask"
+
+- id: registry-run-key
+  match:
+    regex: '(?i){cmd}(?:reg(?:\.exe)?\s+add|(?:new|set)-itemproperty)(?=\s).*\\currentversion\\run(?:once(?:ex)?|services(?:once)?)?\b'
+  meaning: Adds a Registry Run key value, so a program starts at every logon.
+  techniques: [T1547.001]
+  artifacts: [Windows Registry Key]
+  iocs: [path]
+  confidence: high
+  platforms: [windows]
+  examples:
+    match:
+      - 'reg add HKCU\Software\Microsoft\Windows\CurrentVersion\Run /v upd /t REG_SZ /d C:\Users\Public\u.exe /f'
+      - 'New-ItemProperty -Path HKCU:\Software\Microsoft\Windows\CurrentVersion\Run -Name upd -Value C:\u.exe'
+      - 'reg add "HKLM\Software\Microsoft\Windows\CurrentVersion\RunOnce" /v x /d C:\x.exe'
+    no_match:
+      - 'reg query HKCU\Software\Microsoft\Windows\CurrentVersion\Run'
+      - 'reg add HKCU\Software\x /v a /d b'
+
+# A root shell (or another user's) through sudo: sudo -i, sudo -s, sudo su or a shell run bare (sudo bash, sudo -u john
+# zsh), with options and a user but no command after. In a cluster, -i or -s comes before any option that takes an
+# argument (-iu deploy). sudo -i whoami runs one command and is glossed by what it runs; sudo su -c and sudo bash -c
+# run their command, and are left to the model.
+- id: sudo-shell
+  match:
+    regex: '{line}sudo(?:[^\S\n]+(?:-[A-Za-z]*[ugCDhprtTU][^\S\n]+[^\s|;&()<>{}`-]{word}*|-{word}+)){0,8}?(?:[^\S\n]+-(?:(?![ugCDhprtTU])[A-Za-z])*[is](?:(?![ugCDhprtTU])[A-Za-z])*(?:[ugCDhprtTU](?:{word}+|[^\S\n]+[^\s|;&()<>{}`-]{word}*))?{end}(?:[^\S\n]+(?:-[A-Za-z]*[ugCDhprtTU][^\S\n]+[^\s|;&()<>{}`-]{word}*|-{word}*)){0,8}|[^\S\n]+su{end}(?:[^\S\n]+-(?![\w-]*[cC]){word}*){0,8}(?:[^\S\n]+[A-Za-z_][\w.-]*{end}(?:[^\S\n]+-(?![\w-]*[cC]){word}*){0,8})?|[^\S\n]+(?:(?:/usr)?/bin/)?(?:ba|z|da)?sh{end})[^\S\n]*(?:$|[;&|)#])'
+  meaning: Opens a root shell, or another user's, through sudo.
+  techniques: [T1548.003]
+  artifacts: [User Account]
+  confidence: high
+  platforms: [linux, macos]
+  examples:
+    match: ["sudo su", "sudo su -", "sudo -i", "sudo -s", "sudo -u root -i", "sudo su - deploy", "sudo -iu deploy",
+            "sudo -i -u deploy", "sudo bash", "sudo -u john zsh", "sudo /bin/sh"]
+    no_match: ["sudo -i whoami", "sudo -l", "su -", "sudo -u postgres psql", "sudo su -c 'whoami'",
+               "sudo su - postgres -c 'psql -l'", "sudo su root -c id", "sudo -s -- ls", "sudo bash -c id",
+               "sudo bash x.sh", "sudo bash < x.sh"]
+
+# su logs in as another local account (root by default) with that account's password. The line does not show whose
+# credentials are used, so the confidence is low. Only su with login flags (-, -l, --login, -m, -p, -f, -P) and a user
+# is claimed: -c, --command, --session-command, -s and --shell run a command or another shell, and su hands any word
+# after the user to the shell (su root /tmp/x runs /tmp/x), so those go to the model.
+- id: switch-user
+  match:
+    regex: '{cmd}su(?:[^\S\n]+(?:-[lmpfP]*|--(?:login|preserve-environment|pty))(?![^\s;&|)])){0,8}(?:[^\S\n]+[A-Za-z_][\w.-]*(?![^\s;&|)]))?[^\S\n]*(?:$|[;&|)]|(?<=\s)#)'
+  meaning: Switches to another local account, root by default, which takes that account's password.
+  techniques: [T1078.003]
+  artifacts: [User Account]
+  confidence: low
+  platforms: [linux, macos]
+  examples:
+    match: ["su -", "su - root", "su - www-data", "su postgres", "su", "su -l deploy"]
+    no_match: ["sum x", "sudo -i", "su --help", "echo su", "su postgres -c 'psql'", "su -s /bin/sh nobody",
+               "su root --command=id", "su root /tmp/x", "su -lc id", "su#x"]

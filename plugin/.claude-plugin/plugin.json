@@ -1,0 +1,13 @@
+{
+  "name": "interlinear",
+  "displayName": "Interlinear",
+  "version": "0.1.0",
+  "description": "Gloss the lines of an Interlinear transcript that the rule library could not, with MITRE ATT&CK® and ATLAS techniques verified through Countermap.",
+  "author": {
+    "name": "Diego Parra"
+  },
+  "homepage": "https://github.com/elchacal801/interlinear",
+  "repository": "https://github.com/elchacal801/interlinear",
+  "license": "Apache-2.0",
+  "keywords": ["threat-intelligence", "incident-response", "mitre-attack", "shell-history", "ai-agents"]
+}

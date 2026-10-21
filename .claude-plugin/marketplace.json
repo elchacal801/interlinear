@@ -1,0 +1,14 @@
+{
+  "name": "interlinear",
+  "owner": {
+    "name": "Diego Parra"
+  },
+  "description": "Interlinear for Claude Code: line-by-line glosses of attacker shell histories, scripts and AI-agent transcripts.",
+  "plugins": [
+    {
+      "name": "interlinear",
+      "source": "./plugin",
+      "description": "Gloss the lines of an Interlinear transcript that the rule library could not, with MITRE ATT&CK® and ATLAS techniques verified through Countermap."
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+# Collection. Placeholders such as {stage}, {word} and {end} are described in rules.py.
+
+# An archive being created: tar with c in its first argument (tar czf) or in an option word (-czf, --create), zip
+# with an archive name (zip -h is help), and 7z or rar with the a command. Extracting or listing an archive is not this.
+- id: archive-collect
+  match:
+    regex: '{stage}(?:tar(?:\.exe)?{end}(?:[^\S\n]+(?!-)[A-Za-z]*c[A-Za-z]*{end}|(?=(?:[^\S\n]+{word}+){0,16}?[^\S\n]+(?:-[A-Za-z]*c[A-Za-z]*|--create){end}))|zip(?:\.exe)?{end}(?:[^\S\n]+-{word}*){0,8}[^\S\n]+[^\s|;&()<>{}`-]|(?:7z|7za|7zr)(?:\.exe)?{end}[^\S\n]+a{end}|rar{end}[^\S\n]+a{end})'
+  meaning: Packs files into an archive, often to collect data before taking it off the host.
+  techniques: [T1560.001]
+  artifacts: [File]
+  iocs: [path]
+  confidence: medium
+  examples:
+    match: ["tar czf /tmp/d.tgz /var/www", "tar -cvzf out.tar.gz /home/user", "tar --create -f x.tar dir",
+            "zip -r /tmp/d.zip /var/www", "7z a /tmp/d.7z /home", "cd /var && tar -C www -cf /tmp/w.tar ."]
+    no_match: ["tar xzf x.tgz", "tar -tzf x.tgz", "unzip x.zip", "tar -C /opt -xzf x.tgz", "7z x x.7z", "zip -h"]

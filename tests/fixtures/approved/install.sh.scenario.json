@@ -1,0 +1,38 @@
+{
+  "title": "install.sh",
+  "description": "Exported by Interlinear 0.1.0 from install.sh. The steps follow the transcript's line order; each cites its transcript lines and gloss sources.",
+  "authors": [],
+  "steps": [
+    {
+      "id": "s1",
+      "technique": "T1105",
+      "description": "Line 5 (rule; operator): Downloads a file from a remote host to disk."
+    },
+    {
+      "id": "s2",
+      "technique": "T1222.002",
+      "after": [
+        "s1"
+      ],
+      "description": "Line 6 (rule; operator): Makes a file executable, typically a payload that was just downloaded."
+    },
+    {
+      "id": "s3",
+      "technique": "T1053.003",
+      "after": [
+        "s2"
+      ],
+      "description": "Line 7 (rule; operator): Creates or edits a cron job so a command runs on a schedule."
+    },
+    {
+      "id": "s4",
+      "technique": "T1070.004",
+      "after": [
+        "s3"
+      ],
+      "description": "Line 9 (rule; operator): Deletes files that look like intrusion traces (temporary or hidden paths, the running script, dropped tools), or shreds files."
+    }
+  ],
+  "countermeasures": "auto",
+  "max_countermeasures_per_step": 2
+}

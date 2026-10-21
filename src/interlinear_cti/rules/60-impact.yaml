@@ -1,0 +1,22 @@
+# Impact. A miner matches when it runs ({cmd}, described in rules.py), or when a stratum mining URL appears anywhere
+# on the line, which also catches a renamed miner.
+
+- id: cryptominer
+  match:
+    regex: '(?i){cmd}(?:xmrig|xmr-stak|minerd|cpuminer|nbminer|t-rex|lolminer|kdevtmpfsi|kinsing)(?:\.exe)?{end}|stratum\+(?:tcp|ssl)://'
+  meaning: Runs or configures cryptocurrency mining software on the victim's compute.
+  techniques: [T1496.001]
+  artifacts: [Process]
+  iocs: [url, domain, ipv4, port]
+  confidence: high
+  examples:
+    match:
+      - "./xmrig -o stratum+tcp://pool.example[.]com:4444 -u WALLET"
+      - "nohup ./kdevtmpfsi &"
+      - "./xmrig-6.21.0/xmrig --donate-level 1"
+      - "./run -o stratum+ssl://pool.example[.]com:443"
+      - "sudo ./xmrig -c config.json"
+    no_match:
+      - "xmrigger"
+      - "cd xmrig-6.21.0"
+      - "tar xzf xmrig-6.21.0.tar.gz"

