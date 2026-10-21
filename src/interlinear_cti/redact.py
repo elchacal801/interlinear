@@ -66,6 +66,9 @@ _ALWAYS = [
     ("token", re.compile(r"(?i)(?<![\w-])(?:proxy-)?authorization:[ \t]*(?:(?:basic|bearer|token|digest|ntlm|negotiate)"
                          r"""[ \t]+)?(?P<v>[^\s'"]+)""")),
     ("token", re.compile(r"""(?i)(?<![\w-])x-api-key:[ \t]*(?P<v>[^\s'"]+)""")),
+    # A literal cookie, in a Cookie header or curl -b NAME=VALUE (curl -b FILE reads a file; $VAR is left alone).
+    ("token", re.compile(r"""(?i)(?<![\w-])cookie:[ \t]*(?P<v>(?![ \t$])[^'"\n]+)""")),
+    ("token", re.compile(r"""(?<![\w-])(?:-b|--cookie)[ \t]+['"]?(?P<v>[^\s'"=/$]+=[^\s'"]+)""")),
     # Token formats with a known prefix.
     ("key", re.compile(r"(?<![A-Z0-9])(?P<v>(?:AKIA|ASIA|AGPA|AROA|AIDA)[A-Z0-9]{16})(?![A-Z0-9])")),
     ("token", re.compile(r"(?<![\w-])(?P<v>(?:gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{20,}"
@@ -79,6 +82,8 @@ _ALWAYS = [
 _GATED = [
     (_PASSWORD_TOOLS, "password", re.compile(r"(?<![\w-])-p[ \t]+" + _VALUE)),
     (_PASSWORD_TOOLS, "hash", re.compile(r"(?<![\w-])-(?:H|hashes)[ \t]+" + _VALUE)),
+    # impacket's target DOMAIN/USER:PASSWORD with the host given by an option (-dc-ip) instead of @host
+    (_PASSWORD_TOOLS, "password", re.compile(r"""(?<![^\s'"])['"]?[\w.-]+/[\w.$-]+:(?P<v>[^\s@'"/]+)(?=['"]?(?:\s|$))""")),
     (_GLUED_P_TOOLS, "password", re.compile(r"""(?<![\w-])-p(?P<v>[^\s'"|;&<>()]+)""")),
     (_CAPITAL_P_TOOLS, "password", re.compile(r"(?<![\w-])-P[ \t]+" + _VALUE)),
     (_LDAP, "password", re.compile(r"(?<![\w-])-w[ \t]+" + _VALUE)),

@@ -47,6 +47,11 @@ LEAKY = [
     "export ANTHROPIC_API_KEY=sk-ant-api03-aaaaaaaaaaaaaaaaaaaaaaaa",
     "echo 'admin:Summer2026!' | chpasswd",
     "useradd -m -p Passw0rd bob",
+    # impacket's domain/user:password with the host in an option, seen in the OpenRAE Duels re-run
+    "impacket-GetUserSPNs corp.local/michael.thompson:Summer2026! -dc-ip 10.0.0.5 -request",
+    "GetNPUsers.py 'corp/svc:Summer2026!' -dc-ip 10.0.0.5",
+    "curl -H 'Cookie: sid=Passw0rd; theme=dark' http://203.0.113.5/",
+    "curl -b 'sid=Passw0rd' http://203.0.113.5/",
 ]
 
 CLEAN = [
@@ -62,6 +67,10 @@ CLEAN = [
     "Set-ExecutionPolicy Bypass -Scope Process",
     "docker login --password-stdin",
     "curl http://203.0.113.5:8080/x",
+    "curl -b /tmp/session.txt http://203.0.113.5/",
+    'curl -H "Cookie: $SESSION" http://203.0.113.5/',
+    "docker run -v /srv/data:/data img",
+    "impacket-GetUserSPNs -dc-ip 10.0.0.5 corp/jdoe -no-pass",
 ]
 
 
@@ -135,8 +144,9 @@ def test_redaction_scales_linearly():
         return out
 
     for unit in ("a:", "/a:b", "-p ", "a=", "password=", "--password ", "x@", "net user a ", "'", "echo a | ",
-                 "-----BEGIN RSA PRIVATE KEY-----", "Authorization: ", "pass:", "/p:", "$a = '", "eyJa.", "a%"):
-        head = "nxc mysql sqlcmd 7z zip ldapsearch useradd "
+                 "-----BEGIN RSA PRIVATE KEY-----", "Authorization: ", "pass:", "/p:", "$a = '", "eyJa.", "a%",
+                 "a/b:c ", "a/a/a:", "cookie:a", "-b a="):
+        head = "nxc mysql sqlcmd 7z zip ldapsearch useradd impacket-x "
         small, large = (head + unit * (n // len(unit)) for n in (4096, 16384))
         small_time, large_time = best(small), best(large)
         assert large_time < 0.25, (unit, large_time)
