@@ -2,7 +2,7 @@
 
 All notable changes to Interlinear are recorded here. Versions follow [Semantic Versioning](https://semver.org/).
 
-## 0.1.2 (unreleased)
+## 0.1.2 (2026-10-22)
 
 Fixes from an external review of 0.1.1, which used synthetic inputs only. Rules 2026.10.8.
 
