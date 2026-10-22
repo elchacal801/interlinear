@@ -69,9 +69,11 @@
 # Linear: a tempered prefix walks to the first trigger word, so the line has one start. One ^ in front of both
 # branches, so like {cmd} the rule reads the first line only and from one start, and each tempered prefix is taken
 # whole through (?=(...))\N, so a failed match never backtracks through it.
+# The match runs on to the end of the cradle's statement or pipeline stage, so the URL or variable inside
+# DownloadString(...) is read as part of the cradle and not as another command (partial_reason).
 - id: powershell-download-cradle
   match:
-    regex: '(?i)^(?:(?=((?:(?!\b(?:iex|invoke-expression)\b).)*))\1\b(?:iex|invoke-expression)\b.*\b(?:downloadstring|invoke-webrequest|iwr|irm|invoke-restmethod)\b|(?=((?:(?!\b(?:downloadstring|iwr|irm|invoke-webrequest|invoke-restmethod)\b).)*))\2\b(?:downloadstring|iwr|irm|invoke-webrequest|invoke-restmethod)\b.*\|\s*(?:iex|invoke-expression)\b)'
+    regex: '(?i)^(?:(?=((?:(?!\b(?:iex|invoke-expression)\b).)*))\1\b(?:iex|invoke-expression)\b.*\b(?:downloadstring|invoke-webrequest|iwr|irm|invoke-restmethod)\b|(?=((?:(?!\b(?:downloadstring|iwr|irm|invoke-webrequest|invoke-restmethod)\b).)*))\2\b(?:downloadstring|iwr|irm|invoke-webrequest|invoke-restmethod)\b.*\|\s*(?:iex|invoke-expression)\b)[^;&|\n]*'
   meaning: Downloads PowerShell code and runs it in memory without saving it.
   techniques: [T1105, T1059.001]
   artifacts: [URL, PowerShell Script]

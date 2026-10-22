@@ -179,7 +179,7 @@ def test_every_technique_is_known_to_the_fake_resolver(resolver):
 
 
 def test_version_is_bumped(library):
-    assert library.version == "2026.10.7"
+    assert library.version == "2026.10.8"
 
 
 def test_every_example_is_stored_text(library):

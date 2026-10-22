@@ -2,7 +2,7 @@
 
 Sources: `install.sh` (sha256 `6b7c5f564d8a`…, 9 lines)
 
-Glosses: 4 rule, 0 model, 0 analyst, 4 none, 1 pending · rules `2026.10.7` · ATT&CK `20.0`
+Glosses: 4 rule, 0 model, 0 analyst, 4 none, 1 pending · rules `2026.10.8` · ATT&CK `20.0`
 
 ## `install.sh`
 
