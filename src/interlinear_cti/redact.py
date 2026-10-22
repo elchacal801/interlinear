@@ -18,6 +18,8 @@ from __future__ import annotations
 import re
 
 _VALUE = r"""(?P<v>'[^'\n]*'|"[^"\n]*"|[^\s'"|;&<>()]+)"""
+# A password after user: or user%, quoted (blanks and all) or a plain word.
+_QUOTED_OR_WORD = r"""'[^'\n]*'|"[^"\n]*"|[^\s'"]+"""
 # Tools that take a password with -p (and a hash with -H or -hashes); -p means a port or a parent folder to most
 # others.
 _PASSWORD_TOOLS = re.compile(
@@ -44,12 +46,19 @@ _ALWAYS = [
     ("password", re.compile(r"(?i)convertto-securestring[ \t]+(?:-string[ \t]+)?" + _VALUE)),
     # aws configure set aws_secret_access_key VALUE
     ("secret", re.compile(r"(?i)(?<![\w.-])configure[ \t]+set[ \t]+[\w.]*(?:secret|token|key)[\w.]*[ \t]+" + _VALUE)),
+    # curl -u user:password and smbclient -U user%password. The password may be quoted after the separator
+    # (-u user:'pass word'), or the whole credential may be (-u 'user:pass word'), when the password runs to the
+    # closing quote. Before user:password@host below, which would read 'user:P@ss word' as a password P at host ss.
+    ("password", re.compile(r"""(?<![\w-])(?:-u|--user)[ \t]+(?:'[^\s:']+:(?P<v>[^'\n]+)(?=')|"[^\s:"]+:"""
+                            r"""(?P<w>[^"\n]+)(?=")|[^\s:'"]+:(?P<x>""" + _QUOTED_OR_WORD + "))")),
+    ("password", re.compile(r"""(?<![\w-])(?:-U|--user)[ \t]+(?:'[^\s%']+%(?P<v>[^'\n]+)(?=')|"[^\s%"]+%"""
+                            r"""(?P<w>[^"\n]+)(?=")|[^\s%'"]+%(?P<x>""" + _QUOTED_OR_WORD + "))")),
     # user:password@host in a URL or an impacket target (domain/user:password@host). A start follows a blank, / or =,
     # and the user holds none of them, nor does the password hold a /, so a scan from each start ends at the next.
     ("password", re.compile(r"""(?<![^\s/'"=])[^\s:/@'"=]+:(?P<v>[^\s/'"]+)@[^\s@'"/]+""")),
-    # curl -u user:password, smbclient -U user%password, xfreerdp /p:password, openssl pass:password.
-    ("password", re.compile(r"""(?<![\w-])(?:-u|--user)[ \t]+['"]?[^\s:'"]+:(?P<v>[^\s'"]+)""")),
-    ("password", re.compile(r"""(?<![\w-])(?:-U|--user)[ \t]+['"]?[^\s%'"]+%(?P<v>[^\s'"]+)""")),
+    # The same with the password quoted, which may hold blanks, / and @: user:'pass word'@host.
+    ("password", re.compile(r"""(?<![^\s/'"=])[^\s:/@'"=]+:(?P<v>'[^'\n]*'|"[^"\n]*")@[^\s@'"/]+""")),
+    # xfreerdp /p:password, openssl pass:password.
     ("password", re.compile(r"(?i)(?<!\S)/(?:p|pass|password):" + _VALUE)),
     ("password", re.compile(r"(?<![\w-])pass:" + _VALUE)),
     # net user NAME PASSWORD (not * or an option), and net use \\host\share PASSWORD.
@@ -82,9 +91,16 @@ _ALWAYS = [
 _GATED = [
     (_PASSWORD_TOOLS, "password", re.compile(r"(?<![\w-])-p[ \t]+" + _VALUE)),
     (_PASSWORD_TOOLS, "hash", re.compile(r"(?<![\w-])-(?:H|hashes)[ \t]+" + _VALUE)),
-    # impacket's target DOMAIN/USER:PASSWORD with the host given by an option (-dc-ip) instead of @host
+    # impacket's target DOMAIN/USER:PASSWORD with the host given by an option (-dc-ip) instead of @host. The password
+    # may be quoted (domain/user:'pass word'), or the whole target may be ('domain/user:pass word'), when the
+    # password runs to the closing quote, short of a final @host (one without a blank, @, / or quote).
     (_PASSWORD_TOOLS, "password", re.compile(r"""(?<![^\s'"])['"]?[\w.-]+/[\w.$-]+:(?P<v>[^\s@'"/]+)(?=['"]?(?:\s|$))""")),
-    (_GLUED_P_TOOLS, "password", re.compile(r"""(?<![\w-])-p(?P<v>[^\s'"|;&<>()]+)""")),
+    (_PASSWORD_TOOLS, "password", re.compile(r"""(?<![^\s'"])[\w.-]+/[\w.$-]+:(?P<v>'[^'\n]*'|"[^"\n]*")(?=\s|$)""")),
+    (_PASSWORD_TOOLS, "password", re.compile(r"""(?<!\S)(?:'[\w.-]+/[\w.$-]+:(?P<v>[^'\n]+?)(?:@[^\s@'"/]+)?"""
+                                             r"""(?='(?:\s|$))|"[\w.-]+/[\w.$-]+:(?P<w>[^"\n]+?)(?:@[^\s@'"/]+)?"""
+                                             r"""(?="(?:\s|$)))""")),
+    # mysql -pPASSWORD, glued, and -p'pass word' or -p"pass word".
+    (_GLUED_P_TOOLS, "password", re.compile(r"""(?<![\w-])-p(?P<v>'[^'\n]*'|"[^"\n]*"|[^\s'"|;&<>()]+)""")),
     (_CAPITAL_P_TOOLS, "password", re.compile(r"(?<![\w-])-P[ \t]+" + _VALUE)),
     (_LDAP, "password", re.compile(r"(?<![\w-])-w[ \t]+" + _VALUE)),
 ]
@@ -92,10 +108,17 @@ _MARKER = re.compile(r"<redacted [a-z]+>")
 
 
 def _replace(kind: str, pattern: re.Pattern, text: str) -> str:
+    # Where earlier patterns already redacted. A value that overlaps a marker at all is left alone: two patterns that
+    # read the same secret (user:password@host and impacket's domain/user:password) would otherwise read
+    # "<redacted" as a password and garble the marker.
+    markers = [m.span() for m in _MARKER.finditer(text)]
+
     def one(match: re.Match) -> str:
-        if _MARKER.search(match.group("v")):
+        group = next(name for name in ("v", "w", "x") if name in pattern.groupindex and match.group(name) is not None)
+        lo, hi = match.span(group)
+        if any(start < hi and lo < end for start, end in markers):
             return match.group()  # already redacted
-        start, end = match.start("v") - match.start(), match.end("v") - match.start()
+        start, end = lo - match.start(), hi - match.start()
         whole = match.group()
         return whole[:start] + f"<redacted {kind}>" + whole[end:]
 
@@ -104,10 +127,11 @@ def _replace(kind: str, pattern: re.Pattern, text: str) -> str:
 
 def redact(text: str) -> str:
     """text with each credential it holds replaced by <redacted KIND>. Text with nothing to redact is returned
-    unchanged, and redacting twice changes nothing."""
-    for kind, pattern in _ALWAYS:
-        text = _replace(kind, pattern, text)
+    unchanged, and redacting twice changes nothing. The patterns for a known tool run first, since they know how
+    that tool reads its arguments; a later pattern leaves a value already redacted alone."""
     for gate, kind, pattern in _GATED:
         if gate.search(text):
             text = _replace(kind, pattern, text)
+    for kind, pattern in _ALWAYS:
+        text = _replace(kind, pattern, text)
     return text

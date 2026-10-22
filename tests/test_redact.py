@@ -92,6 +92,46 @@ def test_redaction_is_idempotent():
     assert redact(once) == once
 
 
+# Quoted passwords, and passwords with a blank inside quotes, found unredacted in 0.1.1 by an external review. No
+# word of the password may survive, so a value cut at its blank fails too.
+QUOTED = [
+    ("secretsdump.py corp.example/svc_sql:'Summer2026!'@10.0.0.5", "Summer2026!"),
+    ('secretsdump.py corp.example/svc_sql:"Summer2026!"@10.0.0.5', "Summer2026!"),
+    ("secretsdump.py corp.example/svc_sql:'P@ss w0rd'@10.0.0.5", "P@ss w0rd"),
+    ("python3 secretsdump.py corp.example/svc_sql:'Summer2026!'@10.0.0.5", "Summer2026!"),
+    ("impacket-GetUserSPNs corp.local/svc:'P@ss w0rd' -dc-ip 10.0.0.5 -request", "P@ss w0rd"),
+    ("GetNPUsers.py 'corp/svc:P@ss w0rd' -dc-ip 10.0.0.5", "P@ss w0rd"),
+    ("mysql -u root -p'Hunter2!' -h 10.0.0.5", "Hunter2!"),
+    ('mysql -u root -p"Hunter2 two" shop', "Hunter2 two"),
+    ("7z x -p'Hunter2 two' loot.7z", "Hunter2 two"),
+    ("curl -u admin:'P@ss w0rd' http://203.0.113.5/api", "P@ss w0rd"),
+    ("curl -u 'admin:P@ss w0rd' http://203.0.113.5/api", "P@ss w0rd"),
+    ("smbclient //10.0.0.5/c -U admin%'P@ss w0rd'", "P@ss w0rd"),
+    ("smbclient //10.0.0.5/c -U 'admin%P@ss w0rd'", "P@ss w0rd"),
+    ("git clone https://user:'P@ss w0rd'@example.com/x/y", "P@ss w0rd"),
+]
+
+
+@pytest.mark.parametrize("text, secret", QUOTED)
+def test_quoted_passwords_are_redacted_whole(text, secret):
+    out = redact(normalize_text(text))
+    assert "<redacted" in out, out
+    assert not any(word in out for word in secret.split()), out
+
+
+@pytest.mark.parametrize("text", [
+    "secretsdump.py corp.example/svc_sql:Summer2026@10.0.0.5",
+    "impacket-psexec CORP/admin:Summer2026!@10.0.0.5",
+    "python3 GetUserSPNs.py corp.local/svc:Summer2026 -dc-ip 10.0.0.5 -request",
+    "secretsdump.py corp.example/svc_sql:'Summer2026!'@10.0.0.5",
+])
+def test_a_secret_is_redacted_once(text):
+    # Two patterns that both read impacket's DOMAIN/USER:PASSWORD@HOST must not redact the marker the first one left.
+    out = redact(normalize_text(text))
+    assert out.count("<redacted") == 1 and "> password>" not in out, out
+    assert redact(out) == out
+
+
 def test_pending_redacts_by_default_and_the_transcript_keeps_the_evidence(tmp_path, capsys):
     history = tmp_path / ".bash_history"
     history.write_bytes(b"net user hacker Passw0rd /add\nfrobnicate -p Summer2026!\n")
