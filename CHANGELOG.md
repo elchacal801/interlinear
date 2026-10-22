@@ -2,6 +2,30 @@
 
 All notable changes to Interlinear are recorded here. Versions follow [Semantic Versioning](https://semver.org/).
 
+## 0.1.2 (unreleased)
+
+Fixes from an external review of 0.1.1, which used synthetic inputs only. Rules 2026.10.8.
+
+### Redaction
+
+- Quoted passwords are redacted whole: after `user:` in `user:'pass word'@host`, after impacket's
+  `domain/user:'...'` (and a whole quoted target, `'domain/user:pass word'`), after `curl -u user:'...'` and
+  `smbclient -U user%'...'` (or with the whole credential quoted), and glued to `-p` (`mysql -p'...'`, `7z -p"..."`).
+  0.1.1 left them in `interlinear pending` output when the line was still pending, so the gloss skill could send them
+  to the hosted model.
+- A secret matched by two patterns is redacted once. 0.1.1 turned `secretsdump.py domain/user:pw@host` into
+  `user:<redacted password> password>@host`, and redacting that text again changed it again. Patterns for a known
+  tool now run first, and a value that overlaps an existing marker is left alone.
+
+### Rules
+
+- A script run through the interpreter is the command: `python3 secretsdump.py ...`,
+  `python3 /opt/impacket/examples/psexec.py ...` and the other Impacket examples get the same rules as when run by
+  name. Only python's flags that take no argument are stepped over; after `-c`, `-m` or `-W`, python stays the command.
+- The PowerShell download cradle (`IEX (New-Object Net.WebClient).DownloadString('...')`) is no longer marked
+  partial because of the URL or variable inside `DownloadString(...)`. A later pipeline stage still makes it partial.
+- `http-upload` says "a remote web or FTP server", since `curl -T FILE ftp://...` is one of its forms.
+
 ## 0.1.1 (2026-10-22)
 
 Fixes from an external review of 0.1.0, which used synthetic intrusions only.

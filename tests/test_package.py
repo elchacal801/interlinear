@@ -8,7 +8,7 @@ ROOT = Path(__file__).resolve().parent.parent
 def test_package_version():
     import interlinear_cti
 
-    assert interlinear_cti.__version__ == "0.1.1"
+    assert interlinear_cti.__version__ == "0.1.2"
 
 
 def test_every_version_string_agrees():

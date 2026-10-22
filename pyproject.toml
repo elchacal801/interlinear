@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "interlinear-cti"
-version = "0.1.1"
+version = "0.1.2"
 description = "Line-by-line glosses of attacker shell histories, scripts and AI-agent transcripts, with every gloss labeled by its source."
 readme = "README.md"
 license = "Apache-2.0"

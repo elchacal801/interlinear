@@ -1,7 +1,7 @@
 {
   "name": "interlinear",
   "displayName": "Interlinear",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Gloss the lines of an Interlinear transcript that the rule library could not, with MITRE ATT&CK® and ATLAS techniques verified through Countermap.",
   "author": {
     "name": "Diego Parra"
