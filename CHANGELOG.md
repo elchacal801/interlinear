@@ -2,7 +2,7 @@
 
 All notable changes to Interlinear are recorded here. Versions follow [Semantic Versioning](https://semver.org/).
 
-## 0.1.3 (unreleased)
+## 0.1.3 (2026-11-03)
 
 Readers for the agent and C2 logs found on attacker infrastructure, written from each format's structure and checked
 on real collected files in a sandbox (counts only). Rules unchanged (2026.10.8).
