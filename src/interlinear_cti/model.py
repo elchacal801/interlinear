@@ -15,7 +15,10 @@ SCHEMA_MAJOR = "0"
 Actor = Literal["operator", "agent_tool", "agent_reasoning", "tool_output", "unknown"]
 GlossSource = Literal["rule", "model", "analyst", "none", "pending"]
 Status = Literal["active", "revoked", "deprecated", "unknown"]
-SourceKind = Literal["bash_history", "zsh_history", "powershell_history", "script", "agent_jsonl", "pentagi", "unknown"]
+# c2_console: a C2 client's console log, such as Sliver's (added in 0.1.3; 0.1.2 and earlier reject it). Agent logs
+# of every framework stay agent_jsonl, with the framework in Source.agent_framework.
+SourceKind = Literal["bash_history", "zsh_history", "powershell_history", "script", "agent_jsonl", "pentagi",
+                     "c2_console", "unknown"]
 IocType = Literal["url", "ipv4", "ipv6", "domain", "hash", "path", "user", "port"]
 Confidence = Literal["high", "medium", "low"]
 
@@ -76,6 +79,7 @@ class Source(_Strict):
     sha256: str
     size: int
     kind: SourceKind
+    # The agent or C2 framework whose log this is: generic, claude-code, codex, hermes or sliver (set by parse).
     agent_framework: str | None = None
     parsed_at: str
     rejected: str | None = None

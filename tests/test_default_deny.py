@@ -19,7 +19,27 @@ ADD = "user" + "add -o -u 0 svc"
 MARK = "echo MA" + "RK >&2"
 SUB = "a" + BS + "[" + BS + "$" + BS + "(id" + BS + ")" + BS + "]"  # x=a\[\$\(id\)\] stores a[$(id)]
 # agent-call.jsonl holds the whole text as one agent tool call, which parse splits into its commands (D10(a)).
-READERS = (".bash_history", ".zsh_history", "x.sh", "agent.jsonl", "agent-call.jsonl")
+# claude.jsonl, claude-call.jsonl, codex.jsonl and hermes.jsonl hold the same as Claude Code Bash calls, Codex shell
+# calls and Hermes terminal calls, which their readers give as bare commands.
+READERS = (".bash_history", ".zsh_history", "x.sh", "agent.jsonl", "agent-call.jsonl", "claude.jsonl",
+           "claude-call.jsonl", "codex.jsonl", "hermes.jsonl")
+
+
+def _claude(command: str) -> dict:
+    return {"type": "assistant", "sessionId": "s", "message": {"role": "assistant", "content": [
+        {"type": "tool_use", "id": "t", "name": "Bash", "input": {"command": command}}]}}
+
+
+def _codex(command: str) -> dict:
+    arguments = json.dumps({"command": ["bash", "-lc", command]})
+    return {"timestamp": AT, "type": "response_item",
+            "payload": {"type": "function_call", "name": "shell", "arguments": arguments, "call_id": "c"}}
+
+
+def _hermes(command: str) -> dict:
+    arguments = json.dumps({"command": command})
+    return {"role": "assistant", "content": "", "tool_calls": [{"function": {"name": "terminal",
+                                                                              "arguments": arguments}}]}
 PERSISTENCE_WRITES = {"cron-download", "cron", "ssh-authorized-keys-download", "ssh-authorized-keys", "sshd-config",
                       "shell-rc-download", "shell-rc", "rc-script-download", "rc-script", "systemd-service-download",
                       "systemd-service", "pm2-startup", "sudoers-write"}
@@ -35,6 +55,11 @@ def raw_for(kind: str, text: str) -> bytes:
     lines = text.split("\n")
     if kind == "agent-call.jsonl":
         out = json.dumps({"role": "tool_call", "tool": "terminal", "input": text}) + "\n"
+    elif kind == "claude-call.jsonl":
+        out = json.dumps(_claude(text)) + "\n"
+    elif kind in ("claude.jsonl", "codex.jsonl", "hermes.jsonl"):
+        record = {"claude.jsonl": _claude, "codex.jsonl": _codex, "hermes.jsonl": _hermes}[kind]
+        out = "".join(json.dumps(record(t)) + "\n" for t in lines)
     elif kind == "agent.jsonl":
         out = "".join(json.dumps({"role": "tool_call", "tool": "terminal", "input": t}) + "\n" for t in lines)
     elif kind == ".zsh_history":
@@ -131,6 +156,9 @@ BYTES = [
     ("x.sh", ("true\necho $" + NUL + "(id)\n").encode(), ("true", "echo")),
     ("agent.jsonl", (json.dumps({"role": "tool_call", "tool": "terminal", "input": "echo x" + BS + NUL + "\n#|"
                                  + SHADOW}) + "\n").encode(), ("echo", "#|")),
+    ("claude.jsonl", (json.dumps(_claude("echo x" + BS + NUL + "\n#|" + SHADOW)) + "\n").encode(), ("echo", "#|")),
+    ("codex.jsonl", (json.dumps(_codex("echo x" + BS + NUL + "\n#|" + SHADOW)) + "\n").encode(), ("echo", "#|")),
+    ("hermes.jsonl", (json.dumps(_hermes("echo x" + BS + NUL + "\n#|" + SHADOW)) + "\n").encode(), ("echo", "#|")),
     ("x.sh", (": " + BS + CR + "\n" + SHADOW + " #" + CR + "\n").encode(), (":", "shadow")),
     ("x.sh", (": " + BS + CR + "\n" + ADD + "\nls\n").encode(), (":", "user", "ls")),
     ("x.sh", ("echo " + BS + CR + "\n" + ADD + "\n").encode(), ("echo", "user")),
@@ -195,7 +223,8 @@ def test_docker_global_options(tmp_path, library, kind, text):
     assert_hidden(glossed(tmp_path, library, kind, raw_for(kind, text)), ("docker",))
 
 
-@pytest.mark.parametrize("kind", (".bash_history", "x.sh", "agent.jsonl", "agent-call.jsonl"))
+@pytest.mark.parametrize("kind", (".bash_history", "x.sh", "agent.jsonl", "agent-call.jsonl", "claude-call.jsonl",
+                                  "codex.jsonl", "hermes.jsonl"))
 @pytest.mark.parametrize("text, runs", EARLIER, ids=[f"earlier{k}" for k in range(len(EARLIER))])
 def test_earlier_rounds(tmp_path, library, kind, text, runs):
     assert_hidden(glossed(tmp_path, library, kind, raw_for(kind, text)), runs)

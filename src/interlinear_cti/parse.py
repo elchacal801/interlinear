@@ -27,13 +27,27 @@ from .fileio import atomic_write
 from .normalize import defang, has_unusual_characters, normalize_text, split_command_spans
 from .readers import RawCommand, split_lines
 from .readers.agent_log import read_agent_jsonl
+from .readers.claude_code import read_claude_code
+from .readers.codex import read_codex
+from .readers.hermes import SQLITE_HEADER, read_hermes, read_hermes_state
 from .readers.script import read_script, split_powershell_statements
 from .readers.shell_history import read_bash, read_powershell, read_zsh, unmetafy
+from .readers.records import is_operator_config
+from .readers.sliver import is_cast_event, is_cast_header, read_sliver
 from .textshow import is_hidden, show_controls
 
-KINDS = ("auto", "bash", "zsh", "powershell", "script", "agent-jsonl")
+KINDS = ("auto", "bash", "zsh", "powershell", "script", "agent-jsonl", "claude-code", "codex", "hermes", "sliver")
 SOURCE_KIND = {"bash": "bash_history", "zsh": "zsh_history", "powershell": "powershell_history",
-               "script": "script", "agent-jsonl": "agent_jsonl", "unknown": "unknown"}
+               "script": "script", "agent-jsonl": "agent_jsonl", "claude-code": "agent_jsonl", "codex": "agent_jsonl",
+               "hermes": "agent_jsonl", "sliver": "c2_console", "unknown": "unknown"}
+# The readers of agent and C2 console logs, and the framework each names in Source.agent_framework. A record's
+# newlines are inside its JSON string, or are lines the reader joined and placed itself (RawCommand.line_starts), so
+# they are not counted as the file's (iter_lines' physical), and its control characters are checked line by line.
+AGENT_FRAMEWORK = {"agent-jsonl": "generic", "claude-code": "claude-code", "codex": "codex", "hermes": "hermes",
+                   "sliver": "sliver"}
+# The readers whose lines are independent records, read a chunk of whole lines at a time (_read_in_chunks). Sliver
+# recordings and Hermes documents, logs and histories are read whole, since a record there depends on others.
+CHUNKED = frozenset(("agent-jsonl", "claude-code", "codex"))
 SPLIT_ACTORS = {"operator", "agent_tool", "unknown"}
 MAX_FILE_BYTES = 8 * 1024 * 1024  # a larger file is hashed by streaming it, and not parsed
 MAX_LINES = 500_000  # transcript lines per run; the rest of the run is recorded by hash only
@@ -102,8 +116,9 @@ def _uniform_crlf_to_lf(text: str) -> str:
 
 def _glossed_by_rules(actor: str, detected: str) -> bool:
     """Whether the rules read a line of this actor from a file of this kind, as glossing does: in an agent log only
-    the tool calls (its operator lines are chat), elsewhere every line."""
-    return actor == "agent_tool" if detected == "agent-jsonl" else actor in ("operator", "unknown")
+    the tool calls (its operator lines are chat), in a C2 console log none (its commands are the console's own
+    grammar), elsewhere every line."""
+    return actor == "agent_tool" if detected in AGENT_FRAMEWORK else actor in ("operator", "unknown")
 
 
 class _NotRegularFile(Exception):
@@ -151,9 +166,95 @@ def is_binary(data: bytes) -> bool:
     return control / len(sample) > 0.10
 
 
+_CLAUDE_KEYS = frozenset(("sessionId", "parentUuid", "leafUuid"))
+_CODEX_TYPES = frozenset(("session_meta", "response_item", "event_msg", "turn_context", "compacted"))
+# Roles only an OpenAI-style chat log such as Hermes's has (system and developer messages appear in generic logs too).
+_HERMES_ROLES = frozenset(("tool", "session_meta"))
+_LOGRUS_KEYS = frozenset(("level", "msg", "time"))
+_HERMES_FILES = frozenset(("agent.log", "errors.log", "gateway.log", "memory.md", "user.md"))
+
+
+def _record_kind(record: object, name: str) -> str | None:
+    """The agent or C2 log format one JSON record shows, or None when it shows none."""
+    if not isinstance(record, dict):
+        return None
+    keys = record.keys()
+    kind = record.get("type")
+    if isinstance(kind, str) and (_CLAUDE_KEYS & keys or "messageId" in keys and "snapshot" in keys):
+        return "claude-code"
+    if "display" in keys and "timestamp" in keys and ("project" in keys or "pastedContents" in keys):
+        return "claude-code"  # the prompt history
+    if isinstance(kind, str) and kind in _CODEX_TYPES and isinstance(record.get("payload"), dict):
+        return "codex"
+    if {"session_id", "ts", "text"} <= keys:
+        return "codex"  # the prompt history
+    if {"datetime", "block"} <= keys or is_operator_config(record):
+        return "sliver"
+    if _LOGRUS_KEYS <= keys and kind in ("command", "event"):
+        return "sliver"
+    if is_cast_header(record) and "sliver" in name.lower():
+        return "sliver"
+    role = record.get("role")
+    if isinstance(role, str) and (role in _HERMES_ROLES or "tool_calls" in keys or "tool_call_id" in keys):
+        return "hermes"
+    return None
+
+
+def sniff_records(text: str, name: str) -> str | None:
+    """The agent or C2 log format of a file of JSON lines: the first record that shows one decides. Every record is
+    looked at, so a format's marks cannot be pushed past a window by records that show none. None when none does, and
+    the generic agent log reader reads the file."""
+    for line in split_lines(text):
+        if not line.lstrip().startswith("{"):
+            continue
+        try:
+            record = json.loads(line)
+        except (ValueError, RecursionError):
+            continue
+        found = _record_kind(record, name)
+        if found is not None:
+            return found
+    return None
+
+
+def _document_kind(text: str) -> str | None:
+    """The reader of one JSON document written over several lines (so its first line alone is not JSON): a Hermes
+    session snapshot or request dump, or a Sliver operator config (whose reader refuses it), else None."""
+    try:
+        document = json.loads(text)
+    except (ValueError, RecursionError):
+        return None
+    if is_operator_config(document):
+        return "sliver"
+    if not isinstance(document, dict):
+        return None
+    if isinstance(document.get("messages"), list) and ("session_id" in document or "model" in document):
+        return "hermes"
+    request = document.get("request")
+    if isinstance(request, dict) and isinstance(request.get("body"), dict) and "session_id" in document:
+        return "hermes"
+    return None
+
+
+def hermes_name(name: str) -> bool:
+    """Whether a file's name (its path under the folder given, with / separators) is one Hermes writes: the prompt
+    history anywhere, and under a .hermes folder its logs, memories, state database and session files."""
+    parts = name.replace(chr(92), "/").lower().split("/")
+    base = parts[-1]
+    if base in (".hermes_history", "hermes_history") or base.endswith(".hermes_history"):
+        return True
+    if ".hermes" not in parts[:-1]:
+        return False
+    if base in _HERMES_FILES or base == "state.db" or re.fullmatch(r"(?:session|request_dump)_[^/]*[.]json", base):
+        return True
+    return len(parts) > 1 and parts[-2] == "sessions" and base.endswith((".json", ".jsonl"))
+
+
 def detect_kind(name: str, text: str) -> str:
     """The reader for a file: by its name, then by its first non-blank line. The text must not start with a BOM."""
     base = os.path.basename(name).lower()
+    if hermes_name(name):
+        return "hermes"
     # Collected files are often renamed with a host or user prefix, such as web01.bash_history.
     if base in (".zsh_history", "zsh_history", ".histfile") or base.endswith(".zsh_history"):
         return "zsh"
@@ -165,12 +266,21 @@ def detect_kind(name: str, text: str) -> str:
         return "script"
     if base.endswith((".jsonl", ".ndjson")):
         # Whatever the first line holds (a banner, or a record cut mid-write), so tool output is never glossed.
-        return "agent-jsonl"
+        return sniff_records(text, name) or "agent-jsonl"
     first = next((line for line in split_lines(text) if line.strip()), "")
     if first.lstrip().startswith("{"):
         try:
             if isinstance(json.loads(first), dict):
-                return "agent-jsonl"
+                return sniff_records(text, name) or "agent-jsonl"
+        except (ValueError, RecursionError):
+            pass
+        found = _document_kind(text)
+        if found is not None:
+            return found
+    if first.lstrip().startswith("[") and "sliver" in name.lower():  # a console recording without its header
+        try:
+            if is_cast_event(json.loads(first)):
+                return "sliver"
         except (ValueError, RecursionError):
             pass
     if re.match(r"^: [0-9]{9,11}:[0-9]+;", first):
@@ -192,6 +302,14 @@ def read_by_kind(kind: str, name: str, text: str) -> tuple[list[RawCommand], lis
         return read_script(text, powershell=name.lower().endswith(".ps1"), warnings=warnings), warnings
     if kind == "agent-jsonl":
         return read_agent_jsonl(text)
+    if kind == "claude-code":
+        return read_claude_code(text)
+    if kind == "codex":
+        return read_codex(text)
+    if kind == "hermes":
+        return read_hermes(text, name)
+    if kind == "sliver":
+        return read_sliver(text)
     lines = [RawCommand(line=n, text=line, actor="unknown")
              for n, line in enumerate(split_lines(text), start=1) if line.strip()]
     return lines, ["unrecognized format; lines kept as unknown"]
@@ -200,11 +318,11 @@ def read_by_kind(kind: str, name: str, text: str) -> tuple[list[RawCommand], lis
 def _read_in_chunks(kind: str, name: str, text: str):
     """Yield a file's (commands, reader warnings), in one piece, or for an agent log a chunk of whole lines at a time.
 
-    An agent log's lines are independent records, so reading it in chunks gives the same records, with the line
-    numbers in commands and warnings moved back to the file's. It bounds what the reader holds at once, and lets the
-    caller stop reading at a run limit.
+    An agent log's lines are independent records (CHUNKED), so reading it in chunks gives the same records, with the
+    line numbers in commands and warnings moved back to the file's. It bounds what the reader holds at once, and lets
+    the caller stop reading at a run limit.
     """
-    if kind != "agent-jsonl":
+    if kind not in CHUNKED:
         yield read_by_kind(kind, name, text)
         return
     start = offset = 0
@@ -506,6 +624,19 @@ def _decode(data: bytes, name: str, kind: str) -> tuple[str, str, int] | None:
     return text, detected, undecodable
 
 
+def _hermes_state(data: bytes, display: str, kind: str) -> tuple[list[RawCommand], list[str]] | None:
+    """A Hermes state database's (commands, warnings), or None for any other file. With --kind hermes, any SQLite
+    file is read as one; in auto detection only a database file under a Hermes name (hermes_name), and only when it
+    holds Hermes's messages table, so other SQLite files stay binary."""
+    if not data.startswith(SQLITE_HEADER):
+        return None
+    if kind == "hermes":
+        return read_hermes_state(data)
+    if kind == "auto" and hermes_name(display):
+        return read_hermes_state(data, required=False)
+    return None
+
+
 def parse_paths(paths: list[str | Path], kind: str = "auto", case: str | None = None, now: str | None = None,
                 max_file_bytes: int = MAX_FILE_BYTES, max_lines: int = MAX_LINES,
                 max_retained_bytes: int = MAX_RETAINED_BYTES, max_files: int = MAX_FILES) -> dict:
@@ -576,26 +707,38 @@ def parse_paths(paths: list[str | Path], kind: str = "auto", case: str | None = 
             note = f"too large ({size} bytes; limit {max_file_bytes})"
             reject(source, note, f"{name}: {note}; recorded by hash only")
             continue
-        decoded = _decode(data, display, kind)
-        del data
-        if decoded is None:
-            reject(source, "binary file; recorded by hash only", f"{name}: binary file skipped (sha256 {sha256})")
+        try:
+            state = _hermes_state(data, display, kind)
+        except Exception as exc:  # such as MemoryError from SQLite; only the type is reported, as for any reader error
+            reject(source, f"reader error: {type(exc).__name__}",
+                   f"{name}: reader error ({type(exc).__name__}); file skipped")
             continue
-        text, detected, undecodable = decoded
+        if state is not None:  # a Hermes state database, read from its bytes
+            text, detected, undecodable, chunks = "", "hermes", 0, [state]
+        else:
+            decoded = _decode(data, display, kind)
+            chunks = None
+        del data
+        if state is None:
+            if decoded is None:
+                reject(source, "binary file; recorded by hash only", f"{name}: binary file skipped (sha256 {sha256})")
+                continue
+            text, detected, undecodable = decoded
         if undecodable:
             warn(f"{name}: {undecodable} undecodable byte sequence(s) replaced")
         source["kind"] = SOURCE_KIND[detected]
-        if detected == "agent-jsonl":
-            source["agent_framework"] = "generic"
+        source["agent_framework"] = AGENT_FRAMEWORK.get(detected)
         base = os.path.basename(path)
         powershell = detected == "powershell" or (detected == "script" and base.lower().endswith(".ps1"))
         if powershell:
             text = _uniform_crlf_to_lf(text)
-        if detected != "agent-jsonl":  # an agent log's commands are inside its JSON strings, checked line by line
+        if detected not in AGENT_FRAMEWORK:  # an agent log's commands are inside its records, checked line by line
             control = _RAW_CONTROL.search(text)
             if control is not None:
                 source["no_context"] = f"line {text.count(chr(10), 0, control.start()) + 1}: {NO_CONTEXT_NOTE}"
                 warn(f"{name}: {source['no_context']}")
+        if chunks is None:
+            chunks = _read_in_chunks(detected, base, text)
         try:
             file_lines: list[dict] = []
             file_warnings: list[str] = []  # the first MAX_READER_WARNINGS of this file's reader warnings
@@ -604,12 +747,12 @@ def parse_paths(paths: list[str | Path], kind: str = "auto", case: str | None = 
             cut = None
             # Lines are built one at a time, and reading stops at the first one past a limit, so the rest are never
             # read or built. Each command is dropped once its lines are built.
-            for commands, chunk_warnings in _read_in_chunks(detected, base, text):
+            for commands, chunk_warnings in chunks:
                 space = MAX_READER_WARNINGS - len(file_warnings)
                 file_warnings.extend(chunk_warnings[:space])
                 more_warnings += max(len(chunk_warnings) - space, 0)
                 del chunk_warnings
-                for line in iter_lines(_drain(commands), sid, powershell, physical=detected != "agent-jsonl"):
+                for line in iter_lines(_drain(commands), sid, powershell, physical=detected not in AGENT_FRAMEWORK):
                     cost = retained_size(line)
                     if len(lines) + len(file_lines) >= max_lines:
                         cut = line_note

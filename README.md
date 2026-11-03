@@ -97,7 +97,18 @@ Any sandbox works if it gives the parse stage no network, a read-only input, a w
 
 ## Input kinds
 
-A file's name or content decides how it is read, for example `.bash_history`, `.zsh_history`, `ConsoleHost_history.txt`, `.sh`, `.ps1` and agent `.jsonl`. A file that matches none of them is kept line by line as `unknown`.
+A file's name or content decides how it is read, for example `.bash_history`, `.zsh_history`, `ConsoleHost_history.txt`, `.sh`, `.ps1` and agent `.jsonl`. A file that matches none of them is kept line by line as `unknown`. `--kind` picks the reader instead, for every file of the run:
+
+| `--kind` | Reads | Lines |
+|---|---|---|
+| `bash`, `zsh`, `powershell`, `script` | shell histories and scripts | `operator` |
+| `agent-jsonl` | generic agent logs: one JSON record per line with a `role` | by role |
+| `claude-code` | Claude Code session transcripts (`~/.claude/projects/*/*.jsonl`) and its prompt history (`~/.claude/history.jsonl`) | the person's prompts, the model's text and thinking, each tool call (a Bash call as its bare command), tool results |
+| `codex` | Codex CLI session rollouts (`~/.codex/sessions/**/rollout-*.jsonl`, with or without the `response_item` wrapper) and its prompt history (`~/.codex/history.jsonl`) | prompts, reasoning summaries, each tool call (a shell call as its bare command), tool output |
+| `hermes` | Hermes agent files: session snapshots and request dumps (`sessions/*.json`), gateway transcripts (`sessions/*.jsonl`), the state database (`state.db`, on Python 3.11 or later), the logs (`logs/*.log`), the prompt history (`.hermes_history`) and the memories (`memories/*.md`) | chat messages as above (a terminal call as its bare command); log records as tool output; memory entries as the agent's notes |
+| `sliver` | Sliver C2 client console history (`~/.sliver-client/history`), console logs and console recordings (`~/.sliver-client/logs/`, logrus JSON and asciicast) | console commands as `operator`, the console's messages and output as tool output |
+
+In auto detection, the first JSON records of a `.jsonl` file, or of a file whose first line is a JSON object, tell these formats apart; a Hermes log, memory file or state database is recognized by its path under `.hermes/` (a renamed copy needs `--kind hermes`). Records each tool writes for itself (titles, file snapshots, API request copies, costs, environment and instruction wrappers) give no line or are kept as tool output, and a record no rule covers is kept whole as `unknown` with a warning, so nothing drops out silently. A Sliver source is a `c2_console`: its commands are in Sliver's own grammar, so the shell rules never claim them and they go to the model. A Sliver operator config holds credentials and is never read, only named in a warning. The state database is read from its bytes in memory, with SQLite's defensive settings, an untrusted schema and a step budget; a database without Hermes's `messages` table stays binary in auto detection.
 
 An agent tool call that holds several commands is glossed one command at a time. It is split at the newlines, `;`, `&&`, `||` and `&` that end a command, never inside a quoted string, a substitution, a backslash continuation or a heredoc body, and a comment line becomes a line of its own. Each part keeps its call's record line and a `part` entry with its position, the number of parts and where it starts in the command, and the first part holds the whole command, which the Markdown view shows above the parts. The same context rules apply to every part.
 

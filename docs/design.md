@@ -10,8 +10,9 @@ typed, it adds what the line does in plain English, the MITRE ATT&CK® or ATLAS 
 IOCs it touches, and where that gloss came from. The name comes from interlinear glossed text in linguistics: an
 original line with an aligned gloss beneath it.
 
-The inputs are shell histories, dropped scripts and AI-agent logs collected from attacker infrastructure. The outputs
-feed case files, write-ups and Countermap threat models.
+The inputs are shell histories, dropped scripts, AI-agent logs (generic JSONL, Claude Code, Codex and Hermes) and C2
+console logs (Sliver) collected from attacker infrastructure. The outputs feed case files, write-ups and Countermap
+threat models.
 
 ## Pipeline
 
@@ -66,6 +67,12 @@ text, plus its gloss and any earlier glosses an analyst replaced. The schema for
 **Actors.** `operator` (a human-typed command), `agent_tool` (a tool call), `agent_reasoning` (the agent's own text),
 `tool_output` (recorded, never glossed) and `unknown`.
 
+**Source kinds.** Shell histories and scripts are `bash_history`, `zsh_history`, `powershell_history` and `script`.
+Every agent log is `agent_jsonl`, with its framework in `agent_framework` (`generic`, `claude-code`, `codex` or
+`hermes`), so a transcript of any agent log stays readable by 0.1.2. A C2 client's console log is `c2_console`
+(framework `sliver`), new in 0.1.3. The rules read the tool calls of an agent log, never its operator lines (chat), and
+nothing of a C2 console (its commands are in the console's own grammar).
+
 **Gloss sources.**
 
 | Source | Meaning | `by` |
@@ -117,8 +124,8 @@ character, except a PowerShell file whose line endings are all CRLF. Everything 
 
 ## Testing
 
-- **Fixtures** are synthetic bash, zsh and PowerShell histories, shell and PowerShell scripts and agent JSONL, using
-  only documentation addresses and reserved names.
+- **Fixtures** are synthetic bash, zsh and PowerShell histories, shell and PowerShell scripts, agent JSONL and records
+  of each agent and C2 log format written from its structure, using only documentation addresses and reserved names.
 - **Safety tests** parse with sockets and processes patched to fail and under an audit hook, and check that no
   networking module, pydantic, PyYAML or Countermap was loaded.
 - **A defang sweep** checks every fixture's text, IOCs, view and scenario for live URLs, addresses and domains.
@@ -140,6 +147,10 @@ character, except a PowerShell file whose line endings are all CRLF. Everything 
   `readers/script.py` list their known gaps.
 - **Technique tags are role-blind,** and rule glosses of wrappers such as `docker exec` or `ssh host "..."` leave the
   inner command unexplained. See [evaluation.md](evaluation.md).
+- **The agent and C2 log readers follow each format as it was in late 2026.** A record type they do not know is kept
+  whole as `unknown`, with a warning. A Sliver command's session (which implant, on which host) is not kept in the
+  line. A Hermes state database is read without its `-wal` file, so changes not yet checkpointed are missing, and
+  times in Hermes logs and prompt history carry no zone and are read as UTC.
 
 ## Later
 

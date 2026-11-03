@@ -182,7 +182,7 @@ def render_markdown(transcript: Transcript, redact_secrets: bool = False) -> str
     if transcript.datasets.get("attack-enterprise"):
         extra.append(f"ATT&CK {code_span(transcript.datasets['attack-enterprise'])}")
     out.append("Glosses: " + SEPARATOR.join([summary, *extra]))
-    agent = any(s.kind in ("agent_jsonl", "pentagi") for s in transcript.sources)
+    agent = any(s.kind in ("agent_jsonl", "pentagi", "c2_console") for s in transcript.sources)
     sections = []
     for s in transcript.sources:
         lines = [line for line in transcript.lines if line.source == s.id]

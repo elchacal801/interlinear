@@ -31,7 +31,8 @@ from .textshow import show_controls, show_hidden
 
 # Rules gloss commands only. Agent reasoning, chat typed into an agent (an agent log's operator lines) and an agent
 # log's lines of unknown actor are prose, where a rule matching a word would claim a technique nobody ran; they stay
-# pending, for the model. Tool output is never glossed.
+# pending, for the model. A C2 console's commands (a c2_console source's operator lines) are in the console's own
+# grammar, which the shell rules do not describe, so they go to the model too. Tool output is never glossed.
 _COMMAND_SOURCES = frozenset({"bash_history", "zsh_history", "powershell_history", "script"})
 # A rule match on a file parse could not classify is less certain: the text may not be commands at all.
 UNKNOWN_FORMAT_NOTE = "source format unknown; rule applied to unclassified text"
@@ -133,8 +134,10 @@ def is_open(gloss: Gloss) -> bool:
     return gloss.source == "pending" or (gloss.source == "rule" and bool(gloss.partial))
 
 
-def _pending_row(line, redact_secrets: bool) -> dict:
+def _pending_row(line, redact_secrets: bool, consoles: dict[int, str]) -> dict:
     row = {"n": line.n, "actor": line.actor, "text": redact(line.text) if redact_secrets else line.text}
+    if line.source in consoles:  # a command typed into a C2 console, in its own grammar, not a shell's
+        row["console"] = consoles[line.source]
     if line.decoded is not None:
         row["decoded_from"] = line.decoded.parent
     if aimed_at_reader(line.text):  # describe it, never follow it
@@ -147,11 +150,14 @@ def _pending_row(line, redact_secrets: bool) -> dict:
 
 def pending_lines(transcript: Transcript, limit: int = 50, after: int = 0, redact_secrets: bool = False) -> list[dict]:
     """Up to limit lines numbered above after that wait for the model (is_open), so a caller can page through them
-    with the last n it saw. A line a rule glossed only in part carries what the rule found. With redact_secrets, each
-    credential in the text is redacted (redact.redact); the transcript keeps it."""
+    with the last n it saw. A line a rule glossed only in part carries what the rule found, and a line from a C2
+    console log the console's name. With redact_secrets, each credential in the text is redacted (redact.redact); the
+    transcript keeps it."""
     if limit < 1:
         raise ValueError("limit must be at least 1")
-    rows = (_pending_row(line, redact_secrets) for line in transcript.lines
+    consoles = {source.id: source.agent_framework or "unknown" for source in transcript.sources
+                if source.kind == "c2_console"}
+    rows = (_pending_row(line, redact_secrets, consoles) for line in transcript.lines
             if line.n > after and is_open(line.gloss) and line.actor != "tool_output")
     return list(islice(rows, limit))
 

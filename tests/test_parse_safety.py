@@ -1,5 +1,6 @@
 import json
 import socket
+import sqlite3
 import subprocess
 import sys
 from pathlib import Path
@@ -99,6 +100,13 @@ FIXTURES = {
     "loader.ps1": (b"Write-Host 'hi'; whoami\n", "script", None),
     "run.jsonl": (b'{"role": "tool_call", "input": "id"}\n{"role": "tool_result", "output": "uid=0(root)"}\n',
                   "agent_jsonl", None),
+    "session.jsonl": (b'{"type": "assistant", "sessionId": "s", "message": {"role": "assistant", "content": '
+                      b'[{"type": "tool_use", "name": "Bash", "input": {"command": "id"}}]}}\n', "agent_jsonl", None),
+    "rollout.jsonl": (b'{"timestamp": "2026-10-20T10:00:00Z", "type": "response_item", "payload": {"type": '
+                      b'"function_call", "name": "shell", "arguments": "{\\"command\\": [\\"id\\"]}"}}\n',
+                      "agent_jsonl", None),
+    "history": (b'{"datetime": "2026-10-15T09:00:00.123456789Z", "block": "sessions"}\n', "c2_console", None),
+    ".hermes_history": (b"\n# 2026-10-19 12:00:00.000001\n+id\n", "agent_jsonl", None),
     "notes": (b"something odd\n", "unknown", None),
     "payload.bin": (bytes([0x7F]) + b"ELF" + bytes([0, 1, 2]), "unknown", "binary file; recorded by hash only"),
     "utf16.ps1": (bytes([0xFF, 0xFE]) + "Write-Host 'hi'; whoami\r\n".encode("utf-16-le"), "script", None),
@@ -111,6 +119,21 @@ FIXTURES = {
 CAPS = ["--max-file-bytes", "4096", "--max-lines", "40"]
 
 
+def _run_child(tmp_path, mode: str, folder: Path, options: list[str]):
+    child = tmp_path / "child.py"
+    child.write_text(CHILD, encoding="utf-8")
+    out = tmp_path / "out" / "transcript.json"
+    if mode == "zipapp":
+        from interlinear_cti.pyz import build
+
+        target, flags = str(build(tmp_path / "interlinear-parse.pyz")), ["-I", "-S"]
+    else:  # the package this test session imported, so a mutated copy under test is the one checked
+        target, flags = str(Path(interlinear_cti.__file__).resolve().parent.parent), ["-I"]
+    result = subprocess.run([sys.executable, *flags, str(child), target, mode, str(folder), str(out), *options],
+                            capture_output=True, text=True, timeout=120)
+    return result, out
+
+
 @pytest.mark.parametrize("mode", ["package", "zipapp"])
 def test_parse_raises_no_blocked_audit_event_and_loads_no_blocked_module(tmp_path, mode):
     folder = tmp_path / "fixtures"
@@ -121,17 +144,7 @@ def test_parse_raises_no_blocked_audit_event_and_loads_no_blocked_module(tmp_pat
     if sys.platform != "win32":
         (folder / "link").symlink_to(folder / "notes")
         expected["link"] = ("unknown", "symlink, not followed")
-    child = tmp_path / "child.py"
-    child.write_text(CHILD, encoding="utf-8")
-    out = tmp_path / "out" / "transcript.json"
-    if mode == "zipapp":
-        from interlinear_cti.pyz import build
-
-        target, flags = str(build(tmp_path / "interlinear-parse.pyz")), ["-I", "-S"]
-    else:  # the package this test session imported, so a mutated copy under test is the one checked
-        target, flags = str(Path(interlinear_cti.__file__).resolve().parent.parent), ["-I"]
-    result = subprocess.run([sys.executable, *flags, str(child), target, mode, str(folder), str(out), *CAPS],
-                            capture_output=True, text=True, timeout=120)
+    result, out = _run_child(tmp_path, mode, folder, CAPS)
     report = json.loads(result.stdout.strip().splitlines()[-1])
     assert report["before"] == []
     assert report["blocked"] == []
@@ -139,3 +152,24 @@ def test_parse_raises_no_blocked_audit_event_and_loads_no_blocked_module(tmp_pat
     assert report["code"] == 1, result.stderr  # the unknown, binary and capped fixtures add warnings
     data = json.loads(out.read_text(encoding="utf-8"))
     assert {s["name"]: (s["kind"], s["rejected"]) for s in data["sources"]} == expected
+
+
+@pytest.mark.skipif(not hasattr(sqlite3.Connection, "serialize"), reason="needs Python 3.11 or later")
+@pytest.mark.parametrize("mode", ["package", "zipapp"])
+def test_reading_a_hermes_state_database_raises_no_blocked_audit_event(tmp_path, mode):
+    # A Hermes state database is read in memory through sqlite3, never as a file, with the same audit hook.
+    connection = sqlite3.connect(":memory:")
+    connection.execute("CREATE TABLE messages (id INTEGER PRIMARY KEY, session_id TEXT, role TEXT, content TEXT)")
+    connection.execute("INSERT INTO messages (session_id, role, content) VALUES ('s', 'user', 'hi')")
+    connection.commit()
+    folder = tmp_path / "home"
+    (folder / ".hermes").mkdir(parents=True)
+    (folder / ".hermes" / "state.db").write_bytes(connection.serialize())
+    connection.close()
+    result, out = _run_child(tmp_path, mode, folder, [])
+    report = json.loads(result.stdout.strip().splitlines()[-1])
+    assert (report["before"], report["blocked"], report["after"], report["code"]) == ([], [], [], 0), result.stderr
+    data = json.loads(out.read_text(encoding="utf-8"))
+    assert [(s["name"], s["kind"], s["agent_framework"]) for s in data["sources"]] == [
+        (".hermes/state.db", "agent_jsonl", "hermes")]
+    assert [(line["actor"], line["text"]) for line in data["lines"]] == [("operator", "hi")]
