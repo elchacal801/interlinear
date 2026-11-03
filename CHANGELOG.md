@@ -2,6 +2,59 @@
 
 All notable changes to Interlinear are recorded here. Versions follow [Semantic Versioning](https://semver.org/).
 
+## 0.1.3 (unreleased)
+
+Readers for the agent and C2 logs found on attacker infrastructure, written from each format's structure and checked
+on real collected files in a sandbox (counts only). Rules unchanged (2026.10.8).
+
+### Readers
+
+- `--kind claude-code`: Claude Code session transcripts and the prompt history. The person's prompts and slash
+  commands are `operator` lines, the model's text and thinking `agent_reasoning`, each tool call `agent_tool` (a Bash
+  call as its bare command, so the rules read it and it is split into its commands), and tool results, local command
+  output, system notices and API error messages `tool_output`. A subagent's conversation (`isSidechain`) is the
+  agent's own. A queued prompt is the person's; Claude Code's other attachments and its bookkeeping records (titles,
+  file snapshots, queue operations, API request copies, costs) give no line. The text pasted into a prompt follows it.
+- `--kind codex`: Codex CLI session rollouts, with or without the `response_item` wrapper, and the prompt history.
+  Shell calls (`shell`, `shell_command`, `exec_command`, `local_shell_call`) give their command; `bash -lc SCRIPT` gives
+  the script. Developer and system messages and the environment and AGENTS.md wrappers are `tool_output`.
+  `event_msg` records, which repeat the items, give no line.
+- `--kind hermes`: Hermes session snapshots, request dumps (chat and Responses API), gateway transcripts, logs, the
+  prompt history and the memories, chosen by content, with each message on the file line where it starts. The state
+  database (`state.db`) is read from its bytes in memory, never as a file, with SQLite's defensive settings, an
+  untrusted schema and a step budget, on Python 3.11 or later; a WAL database is read without its `-wal` file.
+- `--kind sliver`: the Sliver client console history, console logs (a `command` record is the operator's) and console
+  recordings (asciicast, with or without a header; output and typed input cut into lines). The source kind is the new
+  `c2_console`: Sliver commands are not shell, so no rule claims them and they go to the model. `interlinear pending`
+  marks each such row with `console` (`sliver`), and the gloss skill glosses it as a console command. An operator
+  config holds credentials and is never read, only named in a warning.
+- Auto detection reads the first JSON records of a `.jsonl` file, or of a file whose first line is a JSON object, to
+  tell these formats apart, and knows Hermes's file names under `.hermes/`.
+- In every new reader, a record of a type or shape the reader does not know is kept whole as `unknown` with a warning
+  (one that raised names only the error's type), so nothing drops out unseen and one crafted record cannot make parse
+  skip the file. Values nested as deep as `json.loads` accepts are read, written back and named without recursion
+  errors, a Hermes document's message lines are found without recursion, and a Sliver operator config is refused by
+  every reader, inside any log and when written over several lines.
+- A non-shell tool call's string argument (a Codex `apply_patch` patch, for example) is written as one JSON string, so
+  it is never split into commands that the rules would claim.
+- A Claude Code compaction summary (`isCompactSummary`) is the model's text, not the person's.
+
+### Fixes
+
+- The generic agent log reader names a role, tool or timestamp nested as deep as `json.loads` accepts without
+  overflowing the stack. On Python 3.14, `repr` and `str` failed there, so one crafted line made parse skip the whole
+  file. 0.1.2 failed three hardening tests on Python 3.14 for this reason.
+
+### Transcript
+
+- `Source.kind` may be `c2_console`, which 0.1.2 and earlier reject. Agent logs of every framework stay `agent_jsonl`
+  with the framework in `agent_framework`, so their transcripts stay readable by 0.1.2.
+
+### Tests
+
+- The default-deny probes also run through Claude Code Bash calls, Codex shell calls and Hermes terminal calls, and the
+  parse-safety audit covers the new formats and a state database, as a package and as the zipapp.
+
 ## 0.1.2 (2026-10-22)
 
 Fixes from an external review of 0.1.1, which used synthetic inputs only. Rules 2026.10.8.
