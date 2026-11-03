@@ -16,12 +16,22 @@ def _as_text(value: object) -> str:
     return json.dumps(value, sort_keys=True, ensure_ascii=False)
 
 
+def _shown(value: object, show=repr) -> str:
+    """show(value) for a warning or a tool label, or a description when the value is nested too deeply to show: on
+    Python 3.14, repr and str overflow the stack at depths json.loads still accepts, and the error would make parse
+    skip the whole file."""
+    try:
+        return show(value)
+    except RecursionError:
+        return f"a deeply nested {type(value).__name__}"
+
+
 def _record_ts(record: object, number: int, warnings: list[str]) -> str | None:
     """A JSON object's "ts" in UTC, or None. Raw lines keep it too, so no record drops out of the timeline."""
     value = record.get("ts") if isinstance(record, dict) else None
     ts = iso_to_utc(value)
     if value is not None and ts is None:
-        warnings.append(f"line {number}: unparseable timestamp {value!r}")
+        warnings.append(f"line {number}: unparseable timestamp {_shown(value)}")
     return ts
 
 
@@ -42,7 +52,7 @@ def read_agent_jsonl(text: str) -> tuple[list[RawCommand], list[str]]:
         role = record.get("role") if isinstance(record, dict) else None
         key = role.strip().lower() if isinstance(role, str) else None
         if key not in ROLE_ACTOR:
-            warnings.append(f"line {number}: unrecognized role {role!r}; kept as an unknown line")
+            warnings.append(f"line {number}: unrecognized role {_shown(role)}; kept as an unknown line")
             out.append(RawCommand(line=number, text=line, ts=_record_ts(record, number, warnings), actor="unknown"))
             continue
         field = _BODY_FIELD[key]
@@ -58,7 +68,7 @@ def read_agent_jsonl(text: str) -> tuple[list[RawCommand], list[str]]:
         else:
             text_value = _as_text(body)
             if key == "tool_call" and record.get("tool") and not isinstance(body, str):
-                text_value = f"{record['tool']}: {text_value}"
+                text_value = f"{_shown(record['tool'], str)}: {text_value}"
         out.append(RawCommand(line=number, text=text_value, ts=_record_ts(record, number, warnings),
                               actor=ROLE_ACTOR[key]))
     return out, warnings
